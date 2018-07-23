@@ -10,6 +10,9 @@
 # v1.3 December 2017
 # adding new grid map, SPEI...
 
+# Version Control added! 7/23/18
+
+
 ## NON-INTERACTIVE
 library(weathermetrics)
 library(ggmap)
