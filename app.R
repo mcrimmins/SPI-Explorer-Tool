@@ -280,7 +280,8 @@ ui<-tagList(
                             of this outcome based on historical occurrences. A longer period of record yields more stable results.")
                           ),
                         mainPanel(
-                          plotOutput("transPlot"),
+                          #plotOutput("transPlot"),
+                          plotlyOutput("transPlot"),
                           #plotOutput("gantt"),
                           hr(),
                           p(""),
@@ -289,6 +290,7 @@ ui<-tagList(
                                    tableOutput('spiBoundsTable')
                             )
                           )
+                          
                         )
                           )
                       )
@@ -629,7 +631,7 @@ server <- function(input, output, session) {
     
     
     # Transition Prob Plot -- replaced with dataTrim 
-    output$transPlot<- renderPlot({
+    output$transPlot<- renderPlotly({
       
       state1spi<-as.integer(input$SPIState1) # 8=spi1, 9=spi3, 10=spi12
       state2spi<-as.integer(input$SPIState2) # 8=spi1, 9=spi3, 10=spi12
@@ -728,7 +730,6 @@ server <- function(input, output, session) {
       colnames(spiBoundsOut)<-c("Category","Period 1","Period 2")
       output$spiBoundsTable<-renderTable({spiBoundsOut})
       
-      
       ## NEW BUG FIX deal with use case mo1>mo2...not quite working
       if (mo1 > mo2){
         state2<-as.data.frame(state2[2:nrow(state2),])
@@ -783,12 +784,42 @@ server <- function(input, output, session) {
               legend.position="none") +
         scale_x_date(date_labels = "%b", date_breaks = '1 month') #limits = c(NA, NA)
       
+      # scatterplot of transition table values
+      scatTemp<-as.data.frame(state2temp$`dataTrim$year`)
+      scatTemp$Period1<-state1temp$precip1
+      scatTemp$Period2<-state2temp$precip2
+      colnames(scatTemp)[1]<-"year"
+      
+      # dynamic labels for scat plot
+      ylabTextscat<-paste0("Period 1 Total Precip (in): ", format(p1st,"%b"),"-", format(p1en,"%b"))
+      xlabTextscat<-paste0("Period 2 Total Precip (in): ", format(p2st,"%b"),"-", format(p2en,"%b"))
+      # dynamic title for scat
+      droughtTitlescat<-paste0("Seasonal Total Precipitation (in): ",min(spiStates$`dataTrim$year`),"-",max(spiStates$`dataTrim$year`))
+      
+      pScat <- ggplot(data = scatTemp, aes(x = Period2, y = Period1)) +
+        geom_point(aes(text = paste("Year:", year)), shape=21, fill="red", color="red4", size=2) +
+        geom_vline(xintercept=spiBounds$V2[1])+
+        geom_text(aes(spiBounds$V2[1]+0.15, 0.05),label ='SPI +1', size=3, angle=45) +
+        geom_vline(xintercept=spiBounds$V2[2])+
+        geom_text(aes(spiBounds$V2[2]+0.15, 0.05),label ='SPI 0', size=3, angle=45) +
+        geom_vline(xintercept=spiBounds$V2[3])+
+        geom_text(aes(spiBounds$V2[3]+0.15, 0.05),label ='SPI -1', size=3, angle=45) +
+        geom_hline(yintercept=spiBounds$V1[1])+
+        geom_text(aes(0.05,spiBounds$V1[1]+0.05),label ='SPI +1', vjust = 0, size=3) +
+        geom_hline(yintercept=spiBounds$V1[2])+
+        geom_text(aes(0.05,spiBounds$V1[2]+0.05),label ='SPI 0', vjust = 0, size=3) +
+        geom_hline(yintercept=spiBounds$V1[3])+
+        geom_text(aes(0.05,spiBounds$V1[3]+0.05),label ='SPI -1', vjust = 0, size=3) +
+        labs(x = xlabTextscat, y=ylabTextscat, title=droughtTitlescat)+
+        theme_bw()
+      pScat <- ggplotly(pScat)
+      
       #})
-      grid.arrange(p1, p2, ncol = 1, heights = unit(c(0.65, 0.35),"npc")) # heights = c(3, 1)
+      #grid.arrange(p1, p2, ncol = 1, heights = unit(c(0.65, 0.35),"npc")) # heights = c(3, 1), heights = unit(c(0.65, 0.35)
+      subplot(p1,p2,pScat, nrows = 3)
       
     })
-    
-    
+  
 })
   
 }
