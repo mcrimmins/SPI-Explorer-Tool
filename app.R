@@ -281,7 +281,7 @@ ui<-tagList(
                           ),
                         mainPanel(
                           #plotOutput("transPlot"),
-                          plotlyOutput("transPlot"),
+                          plotlyOutput("transPlot", width = "100%", height = "1000px"),
                           #plotOutput("gantt"),
                           hr(),
                           p(""),
@@ -756,7 +756,7 @@ server <- function(input, output, session) {
       
       p1<-ggplot(data=plotStates)+
         geom_tile(aes(x=state2,y=state1,fill=value))+
-        geom_text(aes(x=state2,y=state1,fill=value, label = textlabel), size=8)+
+        geom_text(aes(x=state2,y=state1,fill=value, label = textlabel), size=4)+
         scale_fill_gradient2(low="white", mid="yellow",high="orangered", midpoint = 25,
                              guide = guide_legend(title="probability(%)"))+
         scale_x_discrete(labels=lblText, limits=lims)+
@@ -771,7 +771,7 @@ server <- function(input, output, session) {
       
       # output$gantt<-renderPlot({
       p2<-ggplot(df_melted, aes(value, task)) +
-        geom_line(size = 5, aes(color=task)) +
+        geom_line(size = 3, aes(color=task)) +
         scale_colour_manual(values=c("Period 1"="grey56", "Period 2"="grey19"))+
         labs(x = '', y = '', title = paste0(indexNameShort,' Timescales')) +
         theme_bw(base_size = 20) +
@@ -816,7 +816,17 @@ server <- function(input, output, session) {
       
       #})
       #grid.arrange(p1, p2, ncol = 1, heights = unit(c(0.65, 0.35),"npc")) # heights = c(3, 1), heights = unit(c(0.65, 0.35)
-      subplot(p1,p2,pScat, nrows = 3)
+      pAll<-subplot(p1,p2,pScat, nrows = 3, heights = c(0.4,0.2,0.4), titleX = TRUE, titleY = TRUE, margin=0.08, which_layout = 1)
+      pAll
+      # improve plotly download image
+      # https://stackoverflow.com/questions/46243516/plotly-download-as-png-resizing-image-when-used-in-rshiny-application
+      # plotly_IMAGE(pAll, 
+      #              width = 800, 
+      #              height = 600, 
+      #              format = "png", 
+      #              scale = 1, 
+      #              out_file = "output.png")
+      # pAll
       
     })
   
