@@ -753,12 +753,14 @@ server <- function(input, output, session) {
       plotStates<-as.data.frame(melt(states))
       plotStatesCts<-as.data.frame(melt(stateCts))
       plotStates$textlabel<-paste0(round(plotStates$value,1)," (n=",plotStatesCts$value,")")
+      # calculate anomalies
+      plotStates$anom <- ifelse(plotStates$state2 ==2 | plotStates$state2 ==3, plotStates$value-34, plotStates$value-16)
       
       p1<-ggplot(data=plotStates)+
-        geom_tile(aes(x=state2,y=state1,fill=value))+
-        geom_text(aes(x=state2,y=state1,fill=value, label = textlabel), size=4)+
-        scale_fill_gradient2(low="white", mid="yellow",high="orangered", midpoint = 25,
-                             guide = guide_legend(title="probability(%)"))+
+        geom_tile(aes(x=state2,y=state1,fill=anom))+
+        geom_text(aes(x=state2,y=state1,fill=anom, label = textlabel), size=4)+
+        scale_fill_gradient2(low="orange", mid="white",high="blue", midpoint = 0,
+                             guide = guide_legend(title="prob anom(%)"))+
         scale_x_discrete(labels=lblText, limits=lims)+
         scale_y_discrete(labels=lblText, limits=lims)+
         labs(x = xlabText, y=ylabText, title=droughtTitle)+
