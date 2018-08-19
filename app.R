@@ -736,7 +736,8 @@ server <- function(input, output, session) {
         state2[nrow(state2)+1,]<-NA
         colnames(state2)<-"state2"
       }
-      ##  
+      ## 
+      
       # combine and convert to factors, cross tabulate
       states<-cbind.data.frame(state1,state2)
       states<-table(states) # counts
@@ -752,14 +753,18 @@ server <- function(input, output, session) {
       # plot table
       plotStates<-as.data.frame(melt(states))
       plotStatesCts<-as.data.frame(melt(stateCts))
-      plotStates$textlabel<-paste0(round(plotStates$value,1)," (n=",plotStatesCts$value,")")
+      #plotStates$textlabel<-paste0(round(plotStates$value,1)," (n=",plotStatesCts$value,")")
       # calculate anomalies
       plotStates$anom <- ifelse(plotStates$state2 ==2 | plotStates$state2 ==3, plotStates$value-34, plotStates$value-16)
+      # up/down arrows
+      plotStates$arrow<-NA
+      plotStates$arrow <- ifelse(plotStates$anom <0, paste0('⬇'), paste0('⬆'))
+      plotStates$textlabel<-paste0(round(plotStates$value,1)," (n=",plotStatesCts$value,") ",plotStates$arrow)
       
       p1<-ggplot(data=plotStates)+
-        geom_tile(aes(x=state2,y=state1,fill=anom))+
+        geom_tile(aes(x=state2,y=state1,fill=anom),color = "black")+ 
         geom_text(aes(x=state2,y=state1,fill=anom, label = textlabel), size=4)+
-        scale_fill_gradient2(low="orange", mid="white",high="blue", midpoint = 0,
+        scale_fill_gradient2(low="lightyellow", mid="white",high="lightblue", midpoint = 0,
                              guide = guide_legend(title="prob anom(%)"))+
         scale_x_discrete(labels=lblText, limits=lims)+
         scale_y_discrete(labels=lblText, limits=lims)+
@@ -791,6 +796,20 @@ server <- function(input, output, session) {
       scatTemp$Period1<-state1temp$precip1
       scatTemp$Period2<-state2temp$precip2
       colnames(scatTemp)[1]<-"year"
+      
+      
+      ## NEW BUG FIX deal with use case mo1>mo2 for scatterplot
+      shift <- function(x, n){
+        c(x[-(seq(n))], rep(NA, n))
+      }
+      
+      if (mo1 > mo2){
+        scatTemp$Period2 <- shift(scatTemp$Period2, 1)
+        # temp2<-scatTemp$Period2[2:nrow(scatTemp)]
+        # temp2[nrow(temp2)+1]<-NA
+        # scatTemp$Period2<-temp2
+      }
+      ## 
       
       # dynamic labels for scat plot
       ylabTextscat<-paste0("Period 1 Total Precip (in): ", format(p1st,"%b"),"-", format(p1en,"%b"))
