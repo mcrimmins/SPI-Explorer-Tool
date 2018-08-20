@@ -12,6 +12,10 @@
 
 # Version Control added! 7/23/18
 
+# profile - run from command line
+# library(profvis)
+# profvis(runApp())
+
 
 ## NON-INTERACTIVE
 library(weathermetrics)
@@ -121,7 +125,7 @@ ui<-tagList(
                           ),
                           HTML('<div style="text-align: center;">Contact Mike Crimmins (<a
                                href="mailto:crimmins@email.arizona.edu">crimmins@email.arizona.edu</a>)
-                               with questions or comments. SPI Explorer Tool v1.3 12/11/17</div>'
+                               with questions or comments. SPI Explorer Tool v2.0 08/19/18</div>'
                           )
                           )
                           )
@@ -536,6 +540,10 @@ server <- function(input, output, session) {
         geom_point(aes(x = lon, y = lat),data = latlon, color="darkred", size=2)+
         ggtitle("PRISM Data Grid Cell")
       output$mapPRISM<-renderPlot(p)
+      # trying to control for ggmap mem usage
+      rm(myMap)
+      gc()
+      #----
       
       # plot of precip time series
       output$monthPlot<-renderPlot({
