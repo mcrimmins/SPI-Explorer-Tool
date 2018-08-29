@@ -31,6 +31,7 @@ library(ggplot2)
 library(leaflet)
 library(zoo)
 library(gridExtra)
+library(gmodels)
 
 
 # initial point for marker
@@ -225,7 +226,15 @@ ui<-tagList(
                                       step=1),
                           hr(),
                           downloadButton("downloadMoData", "Download Data Table"),
-                          hr()
+                          hr(),
+                          tags$b("SPI/SPEI Normality Tests"),
+                          p(htmlOutput("swstat")),
+                          p(htmlOutput("swpval")),
+                          p(htmlOutput("spiMedian")),
+                          p("Arid locations can often have many months with very low or zero precipitation. In these cases the transformation 
+                            applied to SPI or SPEI data will struggle to properly normalize the historical time series. 
+                            If all three of these normality tests are red, then the current month/time period selection is not normal and the standardized values 
+                            should be interpreted with caution (Wu et al. 2007).")
                         ),
                         mainPanel(
                           plotOutput("monthSPIplot"),
@@ -428,6 +437,27 @@ server <- function(input, output, session) {
     
     ### END INTERACTIVE
     
+    # ---- Plot PRISM Grid map
+    # ggmap of PRISM grid
+    lat=input$MyMap_click$lat # input from map
+    lon=input$MyMap_click$lng # input from map
+    latlon<-as.data.frame(cbind(lat,lon))
+    
+    lonP = metaOut$meta$lon
+    latP = metaOut$meta$lat
+    res=0.04166667
+    myLocation <- c(lon = lonP, lat = latP)
+    myMap <- get_map(location=myLocation,
+                     source="google", maptype="terrain", zoom = 13)
+    
+    p<-ggmap(myMap)+
+      annotate('rect', xmin=lonP-(res/2), ymin=latP-(res/2), xmax=lonP+(res/2), ymax=latP+(res/2), col="blue", size=1.5,fill=NA)+
+      labs(x = 'Longitude', y = 'Latitude') +
+      geom_point(aes(x = lon, y = lat),data = latlon, color="darkred", size=2)+
+      ggtitle("PRISM Data Grid Cell")
+    output$mapPRISM<-renderPlot(p)
+    # ----
+    
     # annual precip time series and table & temperature
     
     # ann temp
@@ -522,28 +552,28 @@ server <- function(input, output, session) {
       monthSelect<-as.integer(input$precipSum)  # "1 month"="1","3 month"="2","12 month"="3"
       
       
-      # ggmap of PRISM grid
-      lat=input$MyMap_click$lat # input from map
-      lon=input$MyMap_click$lng # input from map
-      latlon<-as.data.frame(cbind(lat,lon))
-      
-      lonP = metaOut$meta$lon
-      latP = metaOut$meta$lat
-      res=0.04166667
-      myLocation <- c(lon = lonP, lat = latP)
-      myMap <- get_map(location=myLocation,
-                       source="google", maptype="terrain", zoom = 13)
-      
-      p<-ggmap(myMap)+
-        annotate('rect', xmin=lonP-(res/2), ymin=latP-(res/2), xmax=lonP+(res/2), ymax=latP+(res/2), col="blue", size=1.5,fill=NA)+
-        labs(x = 'Longitude', y = 'Latitude') +
-        geom_point(aes(x = lon, y = lat),data = latlon, color="darkred", size=2)+
-        ggtitle("PRISM Data Grid Cell")
-      output$mapPRISM<-renderPlot(p)
-      # trying to control for ggmap mem usage
-      rm(myMap)
-      gc()
-      #----
+      # # ggmap of PRISM grid
+      # lat=input$MyMap_click$lat # input from map
+      # lon=input$MyMap_click$lng # input from map
+      # latlon<-as.data.frame(cbind(lat,lon))
+      # 
+      # lonP = metaOut$meta$lon
+      # latP = metaOut$meta$lat
+      # res=0.04166667
+      # myLocation <- c(lon = lonP, lat = latP)
+      # myMap <- get_map(location=myLocation,
+      #                  source="google", maptype="terrain", zoom = 13)
+      # 
+      # p<-ggmap(myMap)+
+      #   annotate('rect', xmin=lonP-(res/2), ymin=latP-(res/2), xmax=lonP+(res/2), ymax=latP+(res/2), col="blue", size=1.5,fill=NA)+
+      #   labs(x = 'Longitude', y = 'Latitude') +
+      #   geom_point(aes(x = lon, y = lat),data = latlon, color="darkred", size=2)+
+      #   ggtitle("PRISM Data Grid Cell")
+      # output$mapPRISM<-renderPlot(p)
+      # # trying to control for ggmap mem usage
+      # rm(myMap)
+      # gc()
+      # #----
       
       # plot of precip time series
       output$monthPlot<-renderPlot({
@@ -551,7 +581,8 @@ server <- function(input, output, session) {
           geom_bar(stat='identity', fill='springgreen4', color='grey')+
           labs(y="precip (in.)", title=paste0('Precipitation, ',monthSelect,"-month total ending in ",month.name[input$mo1sum]))+
           geom_hline(aes(yintercept=(mean(dataSubset[,55+monthSelect], na.rm = TRUE))))+
-          geom_text(aes(firstYR,(mean(dataSubset[,55+monthSelect], na.rm = TRUE)),label ='average', vjust = -1))+
+          #geom_text(aes(firstYR,(mean(dataSubset[,55+monthSelect], na.rm = TRUE)),label ='average', vjust = -1))+
+          annotate("text", x=firstYR, y=mean(dataSubset[,55+monthSelect], na.rm = TRUE), label="average", color = "black")+
           theme(text = element_text(size = 20))+
           theme_bw()+
           theme(axis.text = element_text(size =14))+
@@ -563,6 +594,10 @@ server <- function(input, output, session) {
       # plot of month SPI
       tempMO<-melt.data.frame(dataSubset, id.vars = "date", variable.name ="year", measure.vars = (7+monthSelect))
       tempMO$pos<-tempMO$value >=0
+      # normality tests - following Wu et al. 2007 https://rmets.onlinelibrary.wiley.com/doi/epdf/10.1002/joc.1371
+      shapiroSPI<-shapiro.test(tempMO$value)
+      medianSPI<-median(tempMO$value)
+      # 
       output$monthSPIplot<-renderPlot({
         ggplot(tempMO, aes(x=date,y=value, fill=pos))+
           geom_bar(stat = "identity", position = "identity")+
@@ -575,6 +610,30 @@ server <- function(input, output, session) {
           theme(axis.text.x = element_text(size=14))+
           theme(axis.text.y = element_text(size=14))
       })
+      
+      # write out normality tests
+      output$swstat <- renderText({ 
+        if(shapiroSPI$statistic < 0.96){
+          return(paste("<span style=\"color:red\">Shapiro-Wilks Statistic:",round(shapiroSPI$statistic,2),"</span>"))
+        }else{
+          return(paste("<span style=\"color:green\">Shapiro-Wilks Statistic:",round(shapiroSPI$statistic,2),"</span>"))
+        }
+      })
+      output$swpval <- renderText({ 
+        if(shapiroSPI$p.value < 0.10){
+          return(paste("<span style=\"color:red\">Shapiro-Wilks p-val:",round(shapiroSPI$p.value,2),"</span>"))
+        }else{
+          return(paste("<span style=\"color:green\">Shapiro-Wilks p-val:",round(shapiroSPI$p.value,2),"</span>"))
+        }
+      })
+      output$spiMedian <- renderText({ 
+        if(medianSPI > 0.05){
+          return(paste("<span style=\"color:red\">Median SPI/SPEI:",round(medianSPI,2),"</span>"))
+        }else{
+          return(paste("<span style=\"color:green\">Median SPI/SPEI:",round(medianSPI,2),"</span>"))
+        }
+      })
+      #---
       
       # plot of distribution
       output$histoPlot<-renderPlot({
@@ -748,6 +807,11 @@ server <- function(input, output, session) {
       
       # combine and convert to factors, cross tabulate
       states<-cbind.data.frame(state1,state2)
+      #---- getting chi square info
+      
+        statesTest<-cbind.data.frame(state1,state2)
+        crossStats<-CrossTable(statesTest$state1,statesTest$state2, expected = TRUE)
+      #----
       states<-table(states) # counts
       stateCts<-states
       states<-prop.table(states,1) # row proportions 1, col=2
@@ -756,7 +820,8 @@ server <- function(input, output, session) {
       # data table for reference?
       
       # dynamic title
-      droughtTitle<-paste0("Drought Category Transition Probabilities: ",min(spiStates$`dataTrim$year`),"-",max(spiStates$`dataTrim$year`))
+      droughtTitle<-paste0("Drought Category Transition Probabilities: ",min(spiStates$`dataTrim$year`),"-",max(spiStates$`dataTrim$year`),
+                           " (Chi Sq. p val=", round(crossStats$chisq$p.value, 2), ")")
       
       # plot table
       plotStates<-as.data.frame(melt(states))
@@ -776,7 +841,7 @@ server <- function(input, output, session) {
                              guide = guide_legend(title="prob anom(%)"))+
         scale_x_discrete(labels=lblText, limits=lims)+
         scale_y_discrete(labels=lblText, limits=lims)+
-        labs(x = xlabText, y=ylabText, title=droughtTitle)+
+        labs(x = xlabText, y=ylabText, title=(droughtTitle))+
         theme(axis.text = element_text(size =14))+
         theme(axis.title = element_text(size=14))+
         theme(axis.text.x = element_text(size=14))+
