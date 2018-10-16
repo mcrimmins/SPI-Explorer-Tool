@@ -33,6 +33,8 @@ library(zoo)
 library(gridExtra)
 library(gmodels)
 
+# API key
+source('APIkey.R', local=TRUE)
 
 # initial point for marker
 latIn<-32
