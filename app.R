@@ -59,7 +59,7 @@ ui<-tagList(
     gtag('config', 'UA-108499551-1');
     </script>"
   )),
-  navbarPage(strong("Standardized Precipitation Index Explorer Tool"),
+  navbarPage(strong("Standardized Precipitation Index Explorer Tool V2.0"),
              
              tabPanel("About Tool",
                       sidebarLayout(
@@ -98,7 +98,17 @@ ui<-tagList(
                                are accessed through the <a
                                href="http://www.rcc-acis.org/docs_webservices.html">Applied
                                Climate Information Web Service</a> and analyzed and plotted
-                               using several R based packages.&nbsp;
+                               using several R based packages. This version of the tool includes the calculation
+                               of the Standardized Precipitation-Evapotranspiration Index (SPEI). More info on the SPEI can be found
+                               <a
+                               href="http://spei.csic.es/home.html">
+                               here.
+                               </a>
+                               &nbsp;<br>
+                               <a
+                               href="https://uaclimateextension.shinyapps.io/SPItoolV1/">
+                               (Click here to access original version of the SPI Explorer Tool)
+                               </a>
                                </body>
                                '),
                           hr(),
@@ -128,7 +138,7 @@ ui<-tagList(
                           ),
                           HTML('<div style="text-align: center;">Contact Mike Crimmins (<a
                                href="mailto:crimmins@email.arizona.edu">crimmins@email.arizona.edu</a>)
-                               with questions or comments. SPI Explorer Tool v2.0 08/19/18</div>'
+                               with questions or comments. SPI Explorer Tool v2.0 03/7/19</div>'
                           )
                           )
                           )
