@@ -157,7 +157,7 @@ ui<-tagList(
                         sidebarPanel(
                           h4("Set location and time period"),
                           p("1. Click map to select location (use +/- buttons to zoom, use cursor to pan)"),
-                          p("2. Adjust years to time period of interest"),
+                          p("2. Use slider to choose time period of interest (limited to at least 30 yr period)"),
                           p("3. Choose drought index (SPI or SPEI)"),
                           p("4. Click download (this may take a couple of seconds, look to upper right corner for progress message)"),
                          
@@ -176,7 +176,7 @@ ui<-tagList(
                           actionButton("refresh","Download data"),
                           hr(),
                           p("Re-download the dataset if you make any changes to location, time period or selected drought index"),
-                          p("All statistics and figures on other pages are calculated based on the location and time period specified here. Time periods of at least 30 years will have more stable estimates of long-term climate statistics.")
+                          p("All statistics and figures on other pages are calculated based on the location and time period specified here. The time period selection forces a minimum length of 30 years to ensure enough observations to calculate meaningful drought indices and climate statistics.")
                           
                         ),
                         mainPanel(
