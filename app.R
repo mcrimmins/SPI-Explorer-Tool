@@ -147,7 +147,7 @@ ui<-tagList(
                           ),
                           HTML('<div style="text-align: center;">Contact Mike Crimmins (<a
                                href="mailto:crimmins@email.arizona.edu">crimmins@email.arizona.edu</a>)
-                               with questions or comments. SPI Explorer Tool v2.0 03/7/19</div>'
+                               with questions or comments. SPI Explorer Tool v2.0 06/17/22</div>'
                           )
                           )
                           )
