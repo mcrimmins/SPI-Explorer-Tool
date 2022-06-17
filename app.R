@@ -16,6 +16,9 @@
 # library(profvis)
 # profvis(runApp())
 
+# updates with R 4.1.2 on hpz
+
+
 
 ## NON-INTERACTIVE
 library(weathermetrics)
@@ -40,6 +43,11 @@ source('APIkey.R', local=TRUE)
 latIn<-32
 lonIn<--110
 
+# slider input for year selection
+INTERVAL = 29
+value = c(as.numeric(format(Sys.Date()-32, "%Y"))-INTERVAL, as.numeric(format(Sys.Date()-32, "%Y")))
+
+
 # tags$link(rel = 'stylesheet', type = 'text/css', href = 'styles.css'),
 #  includeCSS("styles.css"),
 ## UI section  
@@ -59,6 +67,7 @@ ui<-tagList(
     gtag('config', 'UA-108499551-1');
     </script>"
   )),
+  
   navbarPage(strong("Standardized Precipitation Index Explorer Tool V2.0"),
              
              tabPanel("About Tool",
@@ -151,8 +160,14 @@ ui<-tagList(
                           p("2. Adjust years to time period of interest"),
                           p("3. Choose drought index (SPI or SPEI)"),
                           p("4. Click download (this may take a couple of seconds, look to upper right corner for progress message)"),
-                          numericInput("yearFirst","First year:",value = 1895, min=1895, max=(format(Sys.Date()-32, "%Y")), step=1, width = "100px"),
-                          numericInput("yearLast","Last year:",value = format(Sys.Date()-32, "%Y"), min=1896, max=format(Sys.Date()-32, "%Y"), step=1, width = "100px"),
+                         
+                          # text input for year selection
+                          #numericInput("yearFirst","First year:",value = 1895, min=1895, max=(format(Sys.Date()-32, "%Y")), step=1, width = "100px"),
+                          #numericInput("yearLast","Last year:",value = format(Sys.Date()-32, "%Y"), min=1896, max=format(Sys.Date()-32, "%Y"), step=1, width = "100px"),
+                          
+                          # slider input for years
+                          sliderInput("years", "Analysis Period",
+                                      min = 1895, max = as.numeric(format(Sys.Date()-32, "%Y")), value = value, sep=''),
                           
                           radioButtons("dindex", label =("Drought Index"),
                                        choices = list("Standardized Precipitation Index" = 1, "Standardized Precipitation-Evapotranspiration Index" = 2), 
@@ -327,17 +342,16 @@ ui<-tagList(
 ## Server Section
 
 server <- function(input, output, session) {
+  
+  #####
+  # original map click get lat/lon
   # add in leaflet map, overlay PRISM avg precip map or DEM grid...
   output$MyMap <- renderLeaflet({
-    m <- leaflet() %>% setView(lng = -109.054530, lat = 36.992438, zoom = 6) 
-    m %>% addProviderTiles("Esri.WorldTopoMap")
+    m <- leaflet() %>% setView(lng = -109.054530, lat = 36.992438, zoom = 6)
+    m %>% addProviderTiles("Esri.WorldTopoMap") 
+    #%>% addMarkers(lonIn, latIn)
   })
-  
-  #  output$out <- renderPrint({
-  #    validate(need(input$MyMap_click, FALSE))
-  #    str(input$MyMap_click)
-  #     })
-  
+
   observeEvent(input$MyMap_click, {
     leafletProxy("MyMap")%>% clearMarkers() %>%
       addMarkers(input$MyMap_click$lng, input$MyMap_click$lat)
@@ -346,16 +360,84 @@ server <- function(input, output, session) {
     output$latSel<-renderText({paste("Latitude: ",latIn)})
     output$lonSel<-renderText({paste("Longitude: ",lonIn)})
   })
+  #####
+  
+  #####
+  # new drag marker to get lat/lon
+  # output$MyMap = renderLeaflet({
+  #   m <- leaflet() %>% setView(lng = -109.054530, lat = 36.992438, zoom = 6) 
+  #   m %>% addProviderTiles("Esri.WorldTopoMap") %>%
+  #     addMarkers(lat = latIn,lng = lonIn, options = markerOptions(draggable = TRUE))
+  # })
+  # 
+  # observe({
+  #   #print(input$MyMap_marker_dragend)
+  #   latIn<-input$MyMap_marker_dragend$lat
+  #   lonIn<-input$MyMap_marker_dragend$lng
+  #   output$latSel<-renderText({paste("Latitude: ",latIn)})
+  #   output$lonSel<-renderText({paste("Longitude: ",lonIn)})
+  # })
+  #####
+  
+  #####
+  # slider input for years that limits to at least 30yr period
+  observeEvent(input$years,{
+    newvalue = input$years
+    
+    if(value[1] != newvalue[1] && newvalue[2] !=as.numeric(format(Sys.Date()-32, "%Y"))  && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[1], newvalue[1] + INTERVAL))
+    
+    if(value[2] != newvalue[2] && newvalue[1] !=1895 && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[2] - INTERVAL, newvalue[2]))
+    
+    if(value[2]==as.numeric(format(Sys.Date()-32, "%Y"))  && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[2] - INTERVAL, newvalue[2]))
+    
+    if(value[1]==1895  && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[1],newvalue[1]+INTERVAL))
+    
+    value <<- newvalue
+  })
+  #####
+  
   
   
   # download and process data  
   observeEvent(input$refresh, {
+
+    ######
+    # error catch on no map click with download button
+    if(is.null(input$MyMap_click))
+      showModal(modalDialog(
+        title = "Click on map to add location first, then click Download Data",
+        easyClose = TRUE,
+        footer = NULL
+      ))
+    #shiny::validate(need(!is.null(input$MyMap_click), message = "Click map to add location"))
+    shiny::validate(need(input$MyMap_click != '', message = "Click map to add location"))
+    #req(input$MyMap_click)  
+    #####
+    
+    
     withProgress(message = 'Downloading data set', style="old",
                  detail = 'Please wait...',{
+                   
+                   # map click lat/lon
                    lat=input$MyMap_click$lat # input from map
                    lon=input$MyMap_click$lng # input from map
-                   firstYR=as.numeric(input$yearFirst)
-                   lastYR=as.numeric(input$yearLast)
+                   # drag marker lat/lon
+                   #lat=input$MyMap_marker_dragend$lat # input from map
+                   #lon=input$MyMap_marker_dragend$lng # input from map
+                   
+                   # text year input
+                   #firstYR=as.numeric(input$yearFirst)
+                   #lastYR=as.numeric(input$yearLast)
+                   
+                   # sliderinput years
+                   firstYR=as.numeric(value[1])
+                   lastYR=as.numeric(value[2])
+                   
+                   # download data
                    jsonQuery=paste0('{"loc":"',lon,',',lat,'","sdate":"',firstYR,'01","edate":"',lastYR,'12","grid":"21",
                                     "elems":[{"name":"mly_maxt","units":"degreeF"},{"name":"mly_mint","units":"degreeF"},
                                     {"name":"mly_avgt","units":"degreeF"},{"name":"mly_pcpn","units":"inch"}]}')
