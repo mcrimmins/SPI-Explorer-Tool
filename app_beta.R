@@ -1,0 +1,1085 @@
+# SPI Tool based on PRISM data
+# 12/21/15
+
+# SPI Explorer Tool v1.2 8/18/17
+# added SPI selector 1-48 mos
+# added multi-scale plot
+# temps on site summary
+# gantt chart, other minor labels
+
+# v1.3 December 2017
+# adding new grid map, SPEI...
+
+# Version Control added! 7/23/18
+
+# profile - run from command line
+# library(profvis)
+# profvis(runApp())
+
+#####
+# BETA version developed in Sept 2022
+# updates with R 4.1.2 on hpz
+# added error checks and lat/lon entry
+#####
+
+
+## NON-INTERACTIVE
+library(weathermetrics)
+library(ggmap)
+library(RColorBrewer)
+library(plotly)
+library(RCurl)
+library(jsonlite)
+library(SPEI)
+library(reshape)
+library(shiny)
+library(ggplot2)
+library(leaflet)
+library(zoo)
+library(gridExtra)
+library(gmodels)
+
+# API key
+source('APIkey.R', local=TRUE)
+
+# initial point for marker
+#latIn<-NULL
+#lonIn<-NULL
+
+# slider input for year selection
+INTERVAL = 29
+value = c(as.numeric(format(Sys.Date()-32, "%Y"))-INTERVAL, as.numeric(format(Sys.Date()-32, "%Y")))
+
+
+# tags$link(rel = 'stylesheet', type = 'text/css', href = 'styles.css'),
+#  includeCSS("styles.css"),
+## UI section  
+
+ui<-tagList(
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
+  ),  
+  tags$head(HTML(
+    "<!-- Global site tag (gtag.js) - Google Analytics -->
+    <script async src='https://www.googletagmanager.com/gtag/js?id=UA-108499551-1'></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    
+    gtag('config', 'UA-108499551-1');
+    </script>"
+  )),
+  
+  navbarPage(strong("Standardized Precipitation Index Explorer Tool V2.0"),
+             
+             tabPanel("About Tool",
+                      sidebarLayout(
+                        sidebarPanel(HTML('<body>
+                                          Links to other SPI resources:<br>
+                                          <ul>
+                                          <li><a href="http://www.wrcc.dri.edu/spi/explanation.html">Western
+                                          Regional Climate Center</a></li>
+                                          <li><a
+                                          href="http://www.wrcc.dri.edu/wwdt/index.php?folder=spi1">WestWide
+                                          Drought Tracker</a></li>
+                                          <li><a
+                                          href="http://iridl.ldeo.columbia.edu/maproom/Global/Precipitation/SPI.html">International
+                                          Research Institute for Climate and Society</a></li>
+                                          <li><a
+                                          href="https://www.drought.gov/drought/content/products-current-drought-and-monitoring-drought-indicators/standardized-precipitation-index">Drought.gov</a></li>
+                                          <li><a
+                                          href="http://drought.unl.edu/Planning/Monitoring/ComparisonofIndicesIntro/SPI.aspx">National
+                                          Drought Mitigation Center</a></li>
+                                          </ul>
+                                          </body>'
+                        )
+                        ),
+                        mainPanel(
+                          h4("About the SPI Explorer Tool"),
+                          HTML('<body>
+                               The Standardized Precipitation Index (SPI) is a widely used drought
+                               index that has several strenghts including the ability to calculate
+                               precipitation anomalies at different timescales and the ability to
+                               interpret SPI units (standard deviations) in probabilistic terms (<a
+                               href="http://drought.unl.edu/monitoringtools/climatedivisionspi.aspx">click
+                               here for more info on the SPI</a>). This tool was created to
+                               explore SPI values at specific locations by using a gridded climate
+                               dataset (<a href="http://www.prism.oregonstate.edu/">PRISM
+                               Climate</a>) to estimate local precipitation time series. Data
+                               are accessed through the <a
+                               href="http://www.rcc-acis.org/docs_webservices.html">Applied
+                               Climate Information Web Service</a> and analyzed and plotted
+                               using several R based packages. This version of the tool includes the calculation
+                               of the Standardized Precipitation-Evapotranspiration Index (SPEI). More info on the SPEI can be found
+                               <a
+                               href="http://spei.csic.es/home.html">
+                               here.
+                               </a>
+                               &nbsp;<br>
+                               <a
+                               href="https://uaclimateextension.shinyapps.io/SPItoolV1/">
+                               (Click here to access original version of the SPI Explorer Tool)
+                               </a>
+                               </body>
+                               '),
+                          hr(),
+                          HTML('<table
+                               style="width: 90%; height: 75px; text-align: left; margin-left: auto; margin-right: auto;"
+                               border="0" cellpadding="2" cellspacing="2">
+                               <tbody>
+                               <tr>
+                               <td style="text-align: center; width: 373px;"><a
+                               href="http://cals.arizona.edu/climate"><img
+                               style="border: 0px solid ; width: 121px; height: 50px;"
+                               alt="cals"
+                               src="cals.jpg"></a></td>
+                               <td style="text-align: center; width: 405px;"><a
+                               href="http://www.climas.arizona.edu"><img
+                               style="border: 0px solid ; width: 62px; height: 58px;"
+                               alt="climas"
+                               src="climas.png"></a></td>
+                               <td style="text-align: center; width: 442px;"><a
+                               href="http://www.rcc-acis.org/"><img
+                               style="border: 0px solid ; width: 195px; height: 25px;"
+                               alt="acis"
+                               src="acis_logo.png"></a></td>
+                               </tr>
+                               </tbody>
+                               </table>'
+                          ),
+                          HTML('<div style="text-align: center;">Contact Mike Crimmins (<a
+                               href="mailto:crimmins@email.arizona.edu">crimmins@email.arizona.edu</a>)
+                               with questions or comments. SPI Explorer Tool v2.0 06/17/22</div>'
+                          )
+                          )
+                          )
+                          ),                   
+             tabPanel("Set location/time period",
+                      sidebarLayout(
+                        sidebarPanel(
+                          h4("Set location and time period"),
+                          p(HTML("1. <b>CLICK MAP</b> to select location (use +/- buttons to zoom, use cursor to pan)")),
+                          p(HTML("<b>OR</b> enter in Lat/Lon location in decimal degrees and click 'Enter location'")),
+                          # adding in lat/lon numeric input
+                          numericInput("lat", "Latitude", NULL),
+                          numericInput("lon", "Longitude", NULL),
+                          actionButton("button", "Enter location"),
+                          p(),
+                         
+                          # text input for year selection
+                          #numericInput("yearFirst","First year:",value = 1895, min=1895, max=(format(Sys.Date()-32, "%Y")), step=1, width = "100px"),
+                          #numericInput("yearLast","Last year:",value = format(Sys.Date()-32, "%Y"), min=1896, max=format(Sys.Date()-32, "%Y"), step=1, width = "100px"),
+                          
+                          p(HTML("2. <b>Use slider</b> to choose analysis period of interest (limited to at least 30 yr period)")),
+                          # slider input for years
+                          sliderInput("years", "Analysis Period",
+                                      min = 1895, max = as.numeric(format(Sys.Date()-32, "%Y")), value = value, sep=''),
+                          
+                          p(HTML("3. <b>Choose</b> drought index (SPI or SPEI)")),
+                          radioButtons("dindex", label =("Drought Index"),
+                                       choices = list("Standardized Precipitation Index" = 1, "Standardized Precipitation-Evapotranspiration Index" = 2), 
+                                       selected = 1),
+                          
+                          p(HTML("4. <b>Click download</b> (this may take a couple of seconds, look to upper right corner for progress message)")),
+                          actionButton("refresh","Download data"),
+                          hr(),
+                          p(HTML("<b>Re-download the dataset if you make any changes to location, time period or selected drought index</b>")),
+                          p("All statistics and figures on other pages are calculated based on the location and time period specified here. The time period selection forces a minimum length of 30 years to ensure enough observations to calculate meaningful drought indices and climate statistics.")
+                          
+                        ),
+                        mainPanel(
+                          leafletOutput("MyMap",width = "700px", height = "700px"),
+                          verbatimTextOutput("latSel"),
+                          verbatimTextOutput("lonSel")
+                        )
+                      )
+             ),
+             tabPanel("Site Climate Summary",
+                      sidebarLayout(
+                        sidebarPanel(h4("Climate Summary"),
+                                     hr(),
+                                     plotOutput("mapPRISM"),
+                                     h5("Red Dot - Selected Point, Blue Rectangle - PRISM Grid Cell", align="center"),
+                                     hr(),
+                                     tags$b("Site Description"),
+                                     p(textOutput("elev")),
+                                     p(textOutput("annavg")),
+                                     p(textOutput("annavgTemp")),
+                                     hr(),
+                                     p("The annual total precipitation for the selected location and time period are depicted in this
+                                       figure as a simple way to visualize longer-term climate variability including wet periods and droughts.
+                                       The data table below the figure can be re-sorted to find driest and wettest years. Click on
+                                       the arrows next to the column names to change the sort order for that column."),
+                                     hr(),
+                                     downloadButton("downloadAnnData", "Download Data Table"),
+                                     hr()
+                                     ),
+                        mainPanel(
+                          plotOutput("annPlot"),
+                          plotOutput("annPlotTemp"),
+                          dataTableOutput('annTable')
+                        )
+                        )
+                      ),
+             tabPanel("SPI Timescale Comparison",
+                      sidebarLayout(
+                        sidebarPanel(h4("Comparing different SPI timescales"),
+                                     p("The monthly SPI values for the specified location and time period are depicted in the bar plots on the right.
+                                       The top figure is the 1-month SPI which has no moving window used in the calculation.
+                                       The middle (3-month SPI) and bottom (12-month SPI) figures use moving windows of 3 and 12 months
+                                       respectively to quantify precipitation anomalies at these longer timescales. For example,
+                                       the 3 month SPI would be sensitive to seasonally varying amounts of precipitation helping
+                                       to detect short-term changes in drought conditions that may occur over a summer season while
+                                       the 12-month SPI would smooth out seasonal changes and better capture variability at the annual scale."),
+                                     p("The heatmap below shows all SPI values for timescales from 1-48 months for the specified location and time period.
+                                       Use the cursor to hover over the plot to find the monthly SPI value for any timescale and date. Note how longer
+                                       timescale SPI values vary much slower over time with longer wet spells and drought events. Shorter timescales
+                                       vary much more rapidly over time and can be a good indicator of short-term drought conditions on the order
+                                       of months to seasons. This multiscale-SPI plot can also depict when there is a disconnect between short and long
+                                       term drought conditions. Sometimes drought conditions at longer SPI timescales can persist even when short
+                                       term conditions have improved or vice versa. By looking at all SPI timescales for a given date, you can diagnose 
+                                       whether short or long term drought conditions are present or a combination of both.")
+                                     ),
+                        mainPanel(
+                          plotOutput("spiPlots"),
+                          hr(),
+                          plotlyOutput("plotMultiSPI")
+                        )
+                                     )
+                        ),
+             tabPanel("SPI-Precip Comparison",
+                      sidebarLayout(
+                        sidebarPanel(
+                          # radioButtons("precipSum","Choose SPI timescale",
+                          #              c("1 month"="1","3 month"="2","12 month"="3"), selected = ),
+                          sliderInput("precipSum", "Choose timescale (1-48 mos)", min=1,max=48,value=3,step=1),
+                          sliderInput("mo1sum",
+                                      "Choose end month",
+                                      min = 1,
+                                      max = 12,
+                                      value = 7,
+                                      step=1),
+                          hr(),
+                          downloadButton("downloadMoData", "Download Data Table"),
+                          hr(),
+                          tags$b("SPI/SPEI Normality Tests"),
+                          p(htmlOutput("swstat")),
+                          p(htmlOutput("swpval")),
+                          p(htmlOutput("spiMedian")),
+                          p("Arid locations can often have many months with very low or zero precipitation. In these cases the transformation 
+                            applied to SPI or SPEI data will struggle to properly normalize the historical time series. 
+                            If all three of these normality tests are red, then the current month/time period selection is not normal and the standardized values 
+                            should be interpreted with caution (Wu et al. 2007).")
+                        ),
+                        mainPanel(
+                          plotOutput("monthSPIplot"),
+                          plotOutput("monthPlot"),
+                          plotOutput("histoPlot"),
+                          plotOutput("ecdfPlot"),
+                          hr(),
+                          h4("Precipitation Statistics"),
+                          textOutput("avgPrecip"),
+                          tags$head(tags$style("#avgPrecip{color:black;font-size: 16px;font-style: bold;}")),
+                          textOutput("minPrecip"),
+                          tags$head(tags$style("#minPrecip{color:black;font-size: 16px;font-style: bold;}")),
+                          textOutput("maxPrecip"),
+                          tags$head(tags$style("#maxPrecip{color:black;font-size: 16px;font-style: bold;}")),
+                          h4("Precipitation terciles - use to interpret seasonal climate outlooks"),
+                          textOutput("belowPrecip"),
+                          tags$head(tags$style("#belowPrecip{color:#663300;font-size: 16px;font-style: bold;}")),
+                          textOutput("medianPrecip"),
+                          tags$head(tags$style("#medianPrecip{color:black;font-size: 16px;font-style: bold;}")),
+                          textOutput("abovePrecip"),
+                          tags$head(tags$style("#abovePrecip{color:#006600;font-size: 16px;font-style: bold;}")),
+                          hr(),
+                          dataTableOutput('moTable')
+                        )
+                      )
+             ),
+             tabPanel("Drought Category Transitions",
+                      sidebarLayout(
+                        sidebarPanel(
+                          # radioButtons("SPIState1","Period 1 SPI timescale:",
+                          #              c("1 month"="8","3 month"="9","12 month"="10"), selected = ),
+                          sliderInput("SPIState1", "Period 1 timescale (1-12 mos):", min=1,max=12,value=3,step=1),
+                          sliderInput("mo1",
+                                      "Period 1 - End Month:",
+                                      min = 1,
+                                      max = 12,
+                                      value = 7,
+                                      step=1),
+                          # radioButtons("SPIState2","Period 2 SPI timescale:",
+                          #              c("1 month"="8","3 month"="9","12 month"="10")),
+                          sliderInput("SPIState2", "Period 2 timescale (1-12 mos):", min=1,max=12,value=3,step=1),
+                          sliderInput("mo2",
+                                      "Period 2 - End Month:",
+                                      min = 1,
+                                      max = 12,
+                                      value = 9,
+                                      step=1),
+                          hr(),
+                          p("This tool examines the probability of moving from one SPI based drought 
+                            category to another based on the historical precipitation record at this
+                            location. The chart is read as the row indicating the drought category for
+                            the initial month and the column as 'forecast' month. For example, if you were
+                            interested in how often a very wet July was followed by an overall very wet summer (July-Aug-Sep) 
+                            precipitation total, you would set Month 1 to 1-month SPI and July and Month 2 to 3-month SPI and September.
+                            Reading across the first row (month 1-very wet) to the last column (month 2-very wet) indicates the probability
+                            of this outcome based on historical occurrences. A longer period of record yields more stable results.")
+                          ),
+                        mainPanel(
+                          #plotOutput("transPlot"),
+                          plotlyOutput("transPlot", width = "100%", height = "1000px"),
+                          #plotOutput("gantt"),
+                          hr(),
+                          p(""),
+                          fluidRow(
+                            column(12, align="center",
+                                   tableOutput('spiBoundsTable')
+                            )
+                          )
+                          
+                        )
+                          )
+                      )
+             
+             
+             
+             )
+             )
+## Server Section
+
+server <- function(input, output, session) {
+  
+  latIn<-reactiveVal(-999)
+  lonIn<-reactiveVal(-999)
+  
+  # coords <- reactiveValues(latIn = NULL,
+  #                          lonIn = NULL)
+  
+  #####
+  # original map click get lat/lon
+  # add in leaflet map, overlay PRISM avg precip map or DEM grid...
+  output$MyMap <- renderLeaflet({
+    m <- leaflet() %>% setView(lng = -109.054530, lat = 36.992438, zoom = 6)
+    m %>% addProviderTiles("Esri.WorldTopoMap") 
+    #%>% addMarkers(lonIn, latIn)
+  })
+
+  observeEvent(input$MyMap_click, {
+    leafletProxy("MyMap")%>% clearMarkers() %>%
+      addMarkers(input$MyMap_click$lng, input$MyMap_click$lat)
+    # update text boxes based on map click
+    updateNumericInput(session, "lat", value = input$MyMap_click$lat)
+    updateNumericInput(session, "lon", value = input$MyMap_click$lng)    
+    # get location
+    latIn(input$MyMap_click$lat)
+    lonIn(input$MyMap_click$lng)
+    output$latSel<-renderText({paste("Latitude: ",latIn())})
+    output$lonSel<-renderText({paste("Longitude: ",lonIn())})
+  })
+  
+  # look for numeric location input
+  observeEvent(input$button, {
+    leafletProxy("MyMap")%>% clearMarkers() %>%
+      addMarkers(input$lon, input$lat) %>%
+      setView(lng = isolate(input$lon),
+              lat = isolate(input$lat),
+              zoom = 6)
+    # get location
+    latIn(input$lat)
+    lonIn(input$lon)
+    output$latSel<-renderText({paste("Latitude: ",latIn())})
+    output$lonSel<-renderText({paste("Longitude: ",lonIn())})
+  })
+  #####
+  
+  #####
+  # new drag marker to get lat/lon
+  # output$MyMap = renderLeaflet({
+  #   m <- leaflet() %>% setView(lng = -109.054530, lat = 36.992438, zoom = 6) 
+  #   m %>% addProviderTiles("Esri.WorldTopoMap") %>%
+  #     addMarkers(lat = latIn,lng = lonIn, options = markerOptions(draggable = TRUE))
+  # })
+  # 
+  # observe({
+  #   #print(input$MyMap_marker_dragend)
+  #   latIn<-input$MyMap_marker_dragend$lat
+  #   lonIn<-input$MyMap_marker_dragend$lng
+  #   output$latSel<-renderText({paste("Latitude: ",latIn)})
+  #   output$lonSel<-renderText({paste("Longitude: ",lonIn)})
+  # })
+  #####
+  
+  #####
+  # slider input for years that limits to at least 30yr period
+  observeEvent(input$years,{
+    newvalue = input$years
+    
+    if(value[1] != newvalue[1] && newvalue[2] !=as.numeric(format(Sys.Date()-32, "%Y"))  && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[1], newvalue[1] + INTERVAL))
+    
+    if(value[2] != newvalue[2] && newvalue[1] !=1895 && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[2] - INTERVAL, newvalue[2]))
+    
+    if(value[2]==as.numeric(format(Sys.Date()-32, "%Y"))  && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[2] - INTERVAL, newvalue[2]))
+    
+    if(value[1]==1895  && newvalue[2] - newvalue[1] <= INTERVAL)
+      updateSliderInput(session, "years", value = c(newvalue[1],newvalue[1]+INTERVAL))
+    
+    value <<- newvalue
+  })
+  #####
+  
+  
+  
+  # download and process data  
+  observeEvent(input$refresh, {
+
+    ######
+    # error catch on no map click with download button
+    if(is.null(input$MyMap_click) && is.na(input$lat)){
+      locCheck<-0
+    }else {
+      locCheck<-1
+    } 
+    
+    #if(is.null(input$MyMap_click) && is.na(input$lat))
+    if(locCheck==0)
+      showModal(modalDialog(
+        title = "Click on map to add location first, then click Download Data",
+        easyClose = TRUE,
+        footer = NULL
+      ))
+    shiny::validate(need(locCheck!=0, message = "Click map or enter coordinates to add location"))
+    #shiny::validate(need(is.null(input$MyMap_click) != is.na(input$lat), message = "Click map or enter coordinates to add location"))
+    # shiny::validate(need(length(locCheck)!=0, message = "Click map or enter coordinates to add location"))
+    #shiny::validate(need(!is.null(input$MyMap_click), message = "Click map to add location"))
+    #req(input$MyMap_click)  
+    #####
+    
+    
+    withProgress(message = 'Downloading data set', style="old",
+                 detail = 'Please wait...',{
+                   
+                   # map location
+                   lat<-latIn()
+                   lon<-lonIn()
+                   # map click lat/lon
+                   #lat=input$MyMap_click$lat # input from map
+                   #lon=input$MyMap_click$lng # input from map
+                   # drag marker lat/lon
+                   #lat=input$MyMap_marker_dragend$lat # input from map
+                   #lon=input$MyMap_marker_dragend$lng # input from map
+                   
+                   # text year input
+                   #firstYR=as.numeric(input$yearFirst)
+                   #lastYR=as.numeric(input$yearLast)
+                   
+                   # sliderinput years
+                   firstYR=as.numeric(value[1])
+                   lastYR=as.numeric(value[2])
+                   
+                   # download data
+                   jsonQuery=paste0('{"loc":"',lon,',',lat,'","sdate":"',firstYR,'01","edate":"',lastYR,'12","grid":"21",
+                                    "elems":[{"name":"mly_maxt","units":"degreeF"},{"name":"mly_mint","units":"degreeF"},
+                                    {"name":"mly_avgt","units":"degreeF"},{"name":"mly_pcpn","units":"inch"}]}')
+                   out<-postForm("http://data.rcc-acis.org/GridData", 
+                                 .opts = list(postfields = jsonQuery, 
+                                              httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')))
+                   out<-fromJSON(out)
+                   
+                   # meta output
+                   jsonQuery=paste0('{"loc":"',lon,',',lat,'","grid":"21","elems":"4","meta":"ll,elev","date":"2010-01-01"}')
+                   metaOut<-postForm("http://data.rcc-acis.org/GridData", 
+                                     .opts = list(postfields = jsonQuery, 
+                                                  httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')))
+                   metaOut<-fromJSON(metaOut)
+                   output$elev<-renderText({paste("Avg Elevation of Grid Cell (ft): ",as.character(metaOut$meta$elev))})
+                   
+                   # get data from list
+                   data<-data.frame(out$data)
+                   colnames(data)<-c("date","t_max","t_min","t_mean","precip")
+                   data$date<-as.Date(paste(data$date,"-01",sep=""))
+                   # set -999 to NA
+                   data[data == -999] <- NA
+                   
+                   # convert columns to numeric
+                   unfactorize<-c("t_max","t_min","t_mean","precip")
+                   data[,unfactorize]<-lapply(unfactorize, function(x) as.numeric(as.character(data[,x])))
+                   
+                   # get months and years
+                   data$month<-as.numeric(format(data$date, "%m"))
+                   data$year<-as.numeric(format(data$date, "%Y"))
+                   
+                   # Switch between SPI/SPEI 
+                   if (as.numeric(input$dindex)==1){
+                     ## Loop thru full SPI set
+                     for(i in 1:48){
+                       tempSPI <- spi(data$precip,i, na.rm = TRUE)
+                       data[[paste('spi',i,sep="")]] <-tempSPI$fitted
+                     }
+                     indexName="Standardized Precipitation Index"
+                     indexNameShort="SPI"
+                   }
+                   else{
+                     # # SPEI switch?
+                     #  PET <- thornthwaite(fahrenheit.to.celsius(data$t_mean,round=2), lat, na.rm = TRUE) 
+                     PET <- hargreaves(fahrenheit.to.celsius(data$t_min,round=2),fahrenheit.to.celsius(data$t_max,round=2),Ra=NA, lat, na.rm = TRUE) 
+                     for(i in 1:48){
+                       tempSPI <- spei(inches_to_metric(data$precip,unit="mm",round=2)-PET,i, na.rm = TRUE)
+                       data[[paste('spi',i,sep="")]] <-tempSPI$fitted
+                     }
+                     indexName="Standardized Precipitation-Evapotranspiration Index"
+                     indexNameShort="SPEI"
+                   }
+                   # # calculate SPI
+                   # spi1<-spi(data$precip,1, na.rm = TRUE)
+                   # data$spi1<-spi1$fitted
+                   # spi3<-spi(data$precip,3, na.rm = TRUE)
+                   # data$spi3<-spi3$fitted
+                   # spi12<-spi(data$precip,12, na.rm = TRUE)
+                   # data$spi12<-spi12$fitted
+                   
+                   # # calculate raw precipitation totals, % of avg
+                   # data$precip1sum<-data$precip
+                   # temp<-rollapply(data$precip,3, sum)
+                   # data$precip3sum= c(rep(NA, nrow(data) - length(temp)),temp)
+                   # temp<-rollapply(data$precip,12, sum)
+                   # data$precip12sum= c(rep(NA, nrow(data) - length(temp)),temp)
+                   
+                   ## Loop thru full raw precip totals
+                   data$precip1sum<-data$precip
+                   for(i in 2:48){
+                     tempSum<-rollapply(data$precip,i, sum)
+                     data[[paste('precip',i,'sum',sep="")]] <-c(rep(NA, nrow(data) - length(tempSum)),tempSum)
+                   }
+                   
+                   # choose SPI windows, create groups
+                   breaks<-c(-999,-1,0,1,999) # 4 breaks
+                   lblText<-c("1"="very dry (<-1)","2"="dry (-1 to 0)","3"="wet (0 to 1)","4"="very wet(>1)")
+                   lims<-c(1:4) # lims for plot
+                   
+                   # trim data without precip data = NA
+                   dataTrim<-data
+                   if (lastYR==as.numeric(format(Sys.Date(), "%Y"))){
+                     data<-data[-(min(which(is.na(data$precip))):nrow(data)), ] # breaks Drought Category tool past current month
+                     # trim again to previous full year
+                     dataTrim<-data[-(which(data$year==as.numeric(format(Sys.Date(), "%Y")))),]
+                   }else{
+                     
+                   }
+              
+    })
+    
+    #####
+    # error catch if all are NA, choose another location
+    if(nrow(data)==0)
+      showModal(modalDialog(
+        title = "No data available -- Please select another location within continental U.S.",
+        easyClose = TRUE,
+        footer = NULL
+      ))
+    shiny::validate(need(nrow(data)>0, message = "No data available, please choose another location"))
+    #####
+    
+    ### END INTERACTIVE
+    
+    # ---- Plot PRISM Grid map
+    # ggmap of PRISM grid
+    #lat=input$MyMap_click$lat # input from map
+    #lon=input$MyMap_click$lng # input from map
+    #lat=latIn() # input from map
+    #lon=lonIn() # input from map
+    latlon<-as.data.frame(cbind(lat,lon))
+    
+    lonP = metaOut$meta$lon
+    latP = metaOut$meta$lat
+    res=0.04166667
+    myLocation <- c(lon = lonP, lat = latP)
+    myMap <- get_map(location=myLocation,
+                     source="google", maptype="terrain", zoom = 13)
+    
+    p<-ggmap(myMap)+
+      annotate('rect', xmin=lonP-(res/2), ymin=latP-(res/2), xmax=lonP+(res/2), ymax=latP+(res/2), col="blue", size=1.5,fill=NA)+
+      labs(x = 'Longitude', y = 'Latitude') +
+      geom_point(aes(x = lon, y = lat),data = latlon, color="darkred", size=2)+
+      ggtitle("PRISM Data Grid Cell")
+    output$mapPRISM<-renderPlot(p)
+    # ----
+    
+    # annual precip time series and table & temperature
+    
+    # ann temp
+    tempAvgAnn<-data[,c(6,4)]
+    tempAvg<-rollmean(tempAvgAnn$t_mean,12)
+    tempAvgAnn$annTemp <-c(rep(NA, nrow(tempAvgAnn) - length(tempAvg)),tempAvg)
+    annTemp<-tempAvgAnn[ which(tempAvgAnn$month==12), ]
+    
+    # combined
+    annData<- data[ which(data$month==12), ]
+    annData<- annData[,c("year","precip12sum")]
+    annData$annAvgTemp<- annTemp$annTemp
+    output$annavg<-renderText({paste("Avg Annual Precip (in): ",round(mean(annData[,c("precip12sum")], na.rm = TRUE),1))})
+    output$annavgTemp<-renderText({paste("Avg Annual Temp (F): ",round(mean(annData$annAvgTemp, na.rm = TRUE),1))})
+    
+    output$annPlot<-renderPlot({
+      ggplot(annData,aes(x=year, y=annData[,c("precip12sum")]))+
+        geom_bar(stat='identity', fill='springgreen4', color='grey')+
+        labs(y="precip (in.)", title='Annual Total Precipitation')+
+        geom_hline(aes(yintercept=(mean(annData[,c("precip12sum")], na.rm = TRUE))))+
+        geom_text(aes(firstYR,(mean(annData[,c("precip12sum")], na.rm = TRUE)),label ='average', vjust = -1)) +
+        theme_bw()+
+        theme(axis.text = element_text(size =14))+
+        theme(axis.title = element_text(size=14))+
+        theme(axis.text.x = element_text(size=14))+
+        theme(axis.text.y = element_text(size=14))
+    })
+    
+    output$annPlotTemp<-renderPlot({
+      ggplot(annData,aes(x=year, y=annData$annAvgTemp))+
+        geom_bar(stat='identity', fill='coral3', color='grey')+
+        labs(y="deg F", title='Annual Average Temperature')+
+        geom_hline(aes(yintercept=(mean(annData$annAvgTemp, na.rm = TRUE))))+
+        geom_text(aes(firstYR,(mean(annData$annAvgTemp, na.rm = TRUE)),label ='average', vjust = -1))+
+        coord_cartesian(ylim=c(min(annData$annAvgTemp, na.rm = TRUE)-1, max(annData$annAvgTemp, na.rm = TRUE)+1))+
+        theme_bw()+
+        theme(axis.text = element_text(size =14))+
+        theme(axis.title = element_text(size=14))+
+        theme(axis.text.x = element_text(size=14))+
+        theme(axis.text.y = element_text(size=14))
+    })
+    
+    annDataTemp<-annData
+    annDataTemp$annAvgTemp<-round(annDataTemp$annAvgTemp,1)
+    colnames(annDataTemp)[2] <- "Total Precip (in)"
+    colnames(annDataTemp)[3] <- "Avg Temp (F)"
+    output$annTable<-renderDataTable({annDataTemp})
+    
+    ## --- Add Download Annual Data 
+    # Downloadable csv of selected dataset ----
+    output$downloadAnnData <- downloadHandler(
+      filename = function() {
+        paste0("AnnualClimateData_",lat,"_",lon, ".csv", sep = "")
+      },
+      content = function(file) {
+        write.csv(annDataTemp, file, row.names = FALSE)
+      }
+    )
+    
+    
+    ## SPI monthly time series
+    tempSPI<-melt.data.frame(data, id.vars="date", variable.name = "year", measure.vars =c("spi1", "spi3","spi12"))
+    tempSPI$pos<-tempSPI$value >=0
+    levels(tempSPI$variable) <- c(paste0("1-month ",indexNameShort), paste0("3-month ",indexNameShort), paste0("12-month ",indexNameShort))
+    output$spiPlots<-renderPlot({
+      ggplot(tempSPI, aes(x=date,y=value, fill=pos))+
+        geom_bar(stat = "identity", position = "identity")+
+        scale_fill_manual(values = c("#8c510a","#01665e"), guide=FALSE)+
+        facet_wrap(~ variable, ncol = 1)+
+        labs(x='month/year',y='SPI', title=paste0(indexName,' - 1/3/12 month'))+
+        theme_bw()
+    })
+    
+    
+    # multiscale SPI ggplot
+    tempSPIall<-melt.data.frame(data, id.vars="date", variable.name = "year", measure.vars =c(8:55))
+    tempSPIall$variable<-as.numeric(gsub("\\D", "", tempSPIall$variable))
+    output$plotMultiSPI <- renderPlotly({
+      plot_ly(tempSPIall, x = ~date, y = ~variable, z = ~value, colors=brewer.pal(11,'BrBG'), type = "heatmap", zmin=-3, zmax=3) %>%
+        layout(title = paste0("Multi-scale ", indexNameShort, " Plot"),
+               xaxis=list(title="Month-Year"),
+               yaxis=list(title="Scale(mos)")
+        )
+      
+    })
+    
+    # Explore SPI/month sum 
+    # subset month -- outside of PRISM refresh
+    observe({
+      dataSubset <- data[ which(data$month==input$mo1sum), ] # set to input
+      # further reduce dataframe based on 1,3,12 month selection
+      monthSelect<-as.integer(input$precipSum)  # "1 month"="1","3 month"="2","12 month"="3"
+      
+      
+      # # ggmap of PRISM grid
+      # lat=input$MyMap_click$lat # input from map
+      # lon=input$MyMap_click$lng # input from map
+      # latlon<-as.data.frame(cbind(lat,lon))
+      # 
+      # lonP = metaOut$meta$lon
+      # latP = metaOut$meta$lat
+      # res=0.04166667
+      # myLocation <- c(lon = lonP, lat = latP)
+      # myMap <- get_map(location=myLocation,
+      #                  source="google", maptype="terrain", zoom = 13)
+      # 
+      # p<-ggmap(myMap)+
+      #   annotate('rect', xmin=lonP-(res/2), ymin=latP-(res/2), xmax=lonP+(res/2), ymax=latP+(res/2), col="blue", size=1.5,fill=NA)+
+      #   labs(x = 'Longitude', y = 'Latitude') +
+      #   geom_point(aes(x = lon, y = lat),data = latlon, color="darkred", size=2)+
+      #   ggtitle("PRISM Data Grid Cell")
+      # output$mapPRISM<-renderPlot(p)
+      # # trying to control for ggmap mem usage
+      # rm(myMap)
+      # gc()
+      # #----
+      
+      # plot of precip time series
+      output$monthPlot<-renderPlot({
+        ggplot(dataSubset,aes(x=year, y=dataSubset[,55+monthSelect]))+
+          geom_bar(stat='identity', fill='springgreen4', color='grey')+
+          labs(y="precip (in.)", title=paste0('Precipitation, ',monthSelect,"-month total ending in ",month.name[input$mo1sum]))+
+          geom_hline(aes(yintercept=(mean(dataSubset[,55+monthSelect], na.rm = TRUE))))+
+          #geom_text(aes(firstYR,(mean(dataSubset[,55+monthSelect], na.rm = TRUE)),label ='average', vjust = -1))+
+          annotate("text", x=firstYR, y=mean(dataSubset[,55+monthSelect], na.rm = TRUE), label="average", color = "black")+
+          theme(text = element_text(size = 20))+
+          theme_bw()+
+          theme(axis.text = element_text(size =14))+
+          theme(axis.title = element_text(size=14))+
+          theme(axis.text.x = element_text(size=14))+
+          theme(axis.text.y = element_text(size=14))
+      })
+      
+      # plot of month SPI
+      tempMO<-melt.data.frame(dataSubset, id.vars = "date", variable.name ="year", measure.vars = (7+monthSelect))
+      tempMO$pos<-tempMO$value >=0
+      # normality tests - following Wu et al. 2007 https://rmets.onlinelibrary.wiley.com/doi/epdf/10.1002/joc.1371
+      shapiroSPI<-shapiro.test(tempMO$value)
+      medianSPI<-median(tempMO$value)
+      # 
+      output$monthSPIplot<-renderPlot({
+        ggplot(tempMO, aes(x=date,y=value, fill=pos))+
+          geom_bar(stat = "identity", position = "identity")+
+          scale_fill_manual(values = c("orange4","chartreuse4"), guide=FALSE)+
+          labs(y=paste0(indexNameShort,"-",monthSelect), title=paste0(indexName,', ',monthSelect,"-month timescale ending in ",month.name[input$mo1sum]))+
+          theme(text = element_text(size = 20))+
+          theme_bw()+
+          theme(axis.text = element_text(size =14))+
+          theme(axis.title = element_text(size=14))+
+          theme(axis.text.x = element_text(size=14))+
+          theme(axis.text.y = element_text(size=14))
+      })
+      
+      # write out normality tests
+      output$swstat <- renderText({ 
+        if(shapiroSPI$statistic < 0.96){
+          return(paste("<span style=\"color:red\">Shapiro-Wilks Statistic:",round(shapiroSPI$statistic,2),"</span>"))
+        }else{
+          return(paste("<span style=\"color:green\">Shapiro-Wilks Statistic:",round(shapiroSPI$statistic,2),"</span>"))
+        }
+      })
+      output$swpval <- renderText({ 
+        if(shapiroSPI$p.value < 0.10){
+          return(paste("<span style=\"color:red\">Shapiro-Wilks p-val:",round(shapiroSPI$p.value,2),"</span>"))
+        }else{
+          return(paste("<span style=\"color:green\">Shapiro-Wilks p-val:",round(shapiroSPI$p.value,2),"</span>"))
+        }
+      })
+      output$spiMedian <- renderText({ 
+        if(medianSPI > 0.05){
+          return(paste("<span style=\"color:red\">Median SPI/SPEI:",round(medianSPI,2),"</span>"))
+        }else{
+          return(paste("<span style=\"color:green\">Median SPI/SPEI:",round(medianSPI,2),"</span>"))
+        }
+      })
+      #---
+      
+      # plot of distribution
+      output$histoPlot<-renderPlot({
+        ggplot(dataSubset,aes(x=dataSubset[,55+monthSelect]))+
+          geom_histogram(fill='grey',color='black')+
+          geom_vline(xintercept=quantile(dataSubset[,55+monthSelect],0.33, na.rm=TRUE),color="chocolate4", size=1.5)+
+          geom_vline(xintercept=quantile(dataSubset[,55+monthSelect],0.50, na.rm=TRUE), size=1.5)+
+          geom_vline(xintercept=quantile(dataSubset[,55+monthSelect],0.66, na.rm=TRUE), color="chartreuse4", size=1.5)+
+          scale_x_continuous(expand = c(0, 0))+ 
+          scale_y_continuous(expand = c(0, 0))+
+          labs(x='precip(in.)', y='count',title=paste0('Frequency of Precipitation Values, ',monthSelect,"-month total ending in ",month.name[input$mo1sum]))+
+          theme(text = element_text(size = 20))+
+          theme_bw()+
+          theme(axis.title = element_text(size=14))+
+          theme(axis.text.x = element_text(size=14))+
+          theme(axis.text.y = element_text(size=14))
+      })
+      
+      # plot of ecdf
+      output$ecdfPlot<-renderPlot({
+        ggplot(dataSubset,aes(x=dataSubset[,55+monthSelect]))+
+          stat_ecdf()+
+          geom_vline(xintercept=quantile(dataSubset[,55+monthSelect],0.33, na.rm=TRUE),color="chocolate4", size=1.5)+
+          geom_vline(xintercept=quantile(dataSubset[,55+monthSelect],0.50, na.rm=TRUE), size=1.5)+
+          geom_vline(xintercept=quantile(dataSubset[,55+monthSelect],0.66, na.rm=TRUE), color="chartreuse4", size=1.5)+
+          labs(x='precip(in.)', y='cumulative probability',title=paste0('Cumulative Probability of Precipitation Values, ',monthSelect,"-month total ending in ",month.name[input$mo1sum]))+
+          theme(text = element_text(size = 20))+
+          theme_bw()+
+          theme(axis.text = element_text(size =14))+
+          theme(axis.title = element_text(size=14))+
+          theme(axis.text.x = element_text(size=14))+
+          theme(axis.text.y = element_text(size=14))
+      })    
+      
+      # write out percentiles
+      output$belowPrecip<-renderText({paste("Below median (33%tile, inches): ",round(quantile(dataSubset[,55+monthSelect],0.33, na.rm=TRUE),1))})
+      output$medianPrecip<-renderText({paste("Median (50%tile, inches): ",round(quantile(dataSubset[,55+monthSelect],0.50, na.rm=TRUE),1))})
+      output$abovePrecip<-renderText({paste("Above median (66%tile, inches): ",round(quantile(dataSubset[,55+monthSelect],0.66, na.rm=TRUE),1))})
+      output$avgPrecip<-renderText({paste("Average (inches): ",round(mean(dataSubset[,55+monthSelect], na.rm = TRUE),2))})
+      output$maxPrecip<-renderText({paste("Max (inches): ",round(max(dataSubset[,55+monthSelect], na.rm = TRUE),2))})
+      output$minPrecip<-renderText({paste("Min (inches): ",round(min(dataSubset[,55+monthSelect], na.rm = TRUE),2))})
+      
+      # output data table
+      tempMonthTable<-cbind(dataSubset[,7],dataSubset[,55+monthSelect],round(dataSubset[,7+monthSelect],2), 
+                            round(dataSubset[,55+monthSelect]/mean(dataSubset[,55+monthSelect], na.rm = TRUE)*100,0))
+      colnames(tempMonthTable)<-c("year","Precip (in)",indexNameShort,"% of Avg Precip")
+      tempMonthTable<-as.data.frame(tempMonthTable)
+      output$moTable<-renderDataTable({tempMonthTable})
+      
+      ## --- Add Download Monthly Data 
+      # Downloadable csv of selected dataset ----
+      output$downloadMoData <- downloadHandler(
+        filename = function() {
+          paste0(month.abb[input$mo1sum],"_",monthSelect,"mo_","ClimateData_",lat,"_",lon, ".csv", sep = "")
+        },
+        content = function(file) {
+          write.csv(tempMonthTable, file, row.names = FALSE)
+        }
+      )
+      
+    })
+    
+    
+    # Transition Prob Plot -- replaced with dataTrim 
+    output$transPlot<- renderPlotly({
+      
+      state1spi<-as.integer(input$SPIState1) # 8=spi1, 9=spi3, 10=spi12
+      state2spi<-as.integer(input$SPIState2) # 8=spi1, 9=spi3, 10=spi12
+      state1<-cut(as.numeric(dataTrim[,state1spi+7]),breaks, labels=c(1:4))  # SET SPI state 1, labels
+      state2<-cut(as.numeric(dataTrim[,state2spi+7]),breaks, labels=c(1:4))  # SET SPI state 2, labels
+      
+      # choose months to compare
+      #spiStates<-cbind.data.frame(data$month, data$year, state1, state2)
+      spiStates<-cbind.data.frame(dataTrim$month, dataTrim$year, state1, state2, dataTrim[,state1spi+7], dataTrim[,state2spi+7], dataTrim[,state1spi+55],dataTrim[,state2spi+55])
+      colnames(spiStates)[5] <- "spi1"
+      colnames(spiStates)[6] <- "spi2"
+      colnames(spiStates)[7] <- "precip1"
+      colnames(spiStates)[8] <- "precip2"
+      
+      # select months    
+      mo1=input$mo1
+      mo2=input$mo2
+      state1<-spiStates[which(dataTrim$month==mo1),] # SET month 1
+      state1<-state1["state1"]
+      state2<-spiStates[which(dataTrim$month==mo2),] # SET month 2
+      state2<-state2["state2"]
+      
+      # date label logic for labels
+      
+      if (mo1 > mo2){
+        startYr<-"2016-01-01"  
+      }
+      else{
+        startYr<-"2017-01-01"
+      }
+      
+      p1en<-as.Date(format(as.yearmon(startYr)+((mo1)/12), "%Y-%m-%d"))-1
+      p1st<-as.Date(format(as.yearmon(startYr)+((mo1)/12)-((state1spi)/12), "%Y-%m-%d"))
+      
+      p2en<-as.Date(format(as.yearmon("2017-01-01")+((mo2)/12), "%Y-%m-%d"))-1
+      p2st<-as.Date(format(as.yearmon("2017-01-01")+((mo2)/12)-((state2spi)/12), "%Y-%m-%d"))
+      
+      # dynamic labels
+      ylabText<-paste0("Period 1: ", indexNameShort,"-",state1spi," (", format(p1st,"%b"),"-", format(p1en,"%b"),")")
+      xlabText<-paste0("Period 2: ", indexNameShort,"-",state2spi," (", format(p2st,"%b"),"-", format(p2en,"%b"),")")
+      
+      # gantt chart for SPI periods ----
+      task1 <- c('Period 1', format(p1st,"%Y-%m-%d"),format(p1en,"%Y-%m-%d"))
+      task2 <- c('Period 2', format(p2st,"%Y-%m-%d"),format(p2en,"%Y-%m-%d"))
+      #task2 <- c('Period 2', paste0('2017-',mo2-(state2spi)+1,'-01') ,paste0('2017-',mo2+1,'-01'))
+      
+      df <- as.data.frame(rbind(task1, task2))
+      names(df) <- c('task', 'start', 'end')
+      df$task <- factor(df$task, levels = c("Period 2","Period 1"))
+      df$start <- as.Date(df$start)
+      df$end <- as.Date(df$end)
+      df_melted <- melt(df, measure.vars = c('start', 'end'))
+      
+      # starting date to begin plot
+      start_date <- p1st-30
+      
+      # ggplot(df_melted, aes(value, task)) +
+      #   geom_line(size = 10) +
+      #   labs(x = '', y = '', title = 'SPI Timescales') +
+      #   theme_bw(base_size = 20) +
+      #   theme(plot.title = element_text(hjust = 0.5),
+      #         panel.grid.major.x = element_line(colour="black", linetype = "dashed"),
+      #         panel.grid.major = element_blank(),
+      #         panel.grid.minor = element_blank(),
+      #         axis.text.x = element_text(angle = 0)) +
+      #   scale_x_date(date_labels = "%b", limits = c(start_date, NA), date_breaks = '1 month')
+      # ---- end gantt chart
+      
+      # new code - write out SPI bounds in inches
+      state1temp<-spiStates[which(dataTrim$month==mo1),] # SET month 1 
+      state2temp<-spiStates[which(dataTrim$month==mo2),] # SET month 2
+      spiBounds<-data.frame()
+      temp<-state1temp[which.min(abs(state1temp$spi1-1)), ]
+      spiBounds[1,1]<-temp[1,7]
+      temp<-state1temp[which.min(abs(state1temp$spi1-0)), ]
+      spiBounds[2,1]<-temp[1,7]
+      temp<-state1temp[which.min(abs(state1temp$spi1-(-1))), ]
+      spiBounds[3,1]<-temp[1,7]    
+      temp<-state2temp[which.min(abs(state2temp$spi2-1)), ]
+      spiBounds[1,2]<-temp[1,8]
+      temp<-state2temp[which.min(abs(state2temp$spi2-0)), ]
+      spiBounds[2,2]<-temp[1,8]
+      temp<-state2temp[which.min(abs(state2temp$spi2-(-1))), ]
+      spiBounds[3,2]<-temp[1,8]      
+      # format output table    
+      spiBoundsOut<-data.frame()
+      spiBoundsOut[1:4,1]<-c("very dry (<-1)","dry (-1 to 0)","wet (0 to 1)","very wet(>1)") 
+      spiBoundsOut[1,2]<-paste("< ",as.character(spiBounds[3,1])," in.")
+      spiBoundsOut[2,2]<-paste(as.character(spiBounds[3,1])," to ",as.character(spiBounds[2,1])," in.")
+      spiBoundsOut[3,2]<-paste(as.character(spiBounds[2,1])," to ",as.character(spiBounds[1,1])," in.")
+      spiBoundsOut[4,2]<-paste("> ",as.character(spiBounds[1,1])," in.")
+      spiBoundsOut[1,3]<-paste("< ",as.character(spiBounds[3,2])," in.")
+      spiBoundsOut[2,3]<-paste(as.character(spiBounds[3,2])," to ",as.character(spiBounds[2,2])," in.")
+      spiBoundsOut[3,3]<-paste(as.character(spiBounds[2,2])," to ",as.character(spiBounds[1,2])," in.")
+      spiBoundsOut[4,3]<-paste("> ",as.character(spiBounds[1,2])," in.")
+      colnames(spiBoundsOut)<-c("Category","Period 1","Period 2")
+      output$spiBoundsTable<-renderTable({spiBoundsOut})
+      
+      ## NEW BUG FIX deal with use case mo1>mo2...not quite working
+      if (mo1 > mo2){
+        state2<-as.data.frame(state2[2:nrow(state2),])
+        state2[nrow(state2)+1,]<-NA
+        colnames(state2)<-"state2"
+      }
+      ## 
+      
+      # combine and convert to factors, cross tabulate
+      states<-cbind.data.frame(state1,state2)
+      #---- getting chi square info
+      
+        statesTest<-cbind.data.frame(state1,state2)
+        crossStats<-CrossTable(statesTest$state1,statesTest$state2, expected = TRUE)
+      #----
+      states<-table(states) # counts
+      stateCts<-states
+      states<-prop.table(states,1) # row proportions 1, col=2
+      states<-states*100
+      
+      # data table for reference?
+      
+      # dynamic title
+      droughtTitle<-paste0("Drought Category Transition Probabilities: ",min(spiStates$`dataTrim$year`),"-",max(spiStates$`dataTrim$year`),
+                           " (Chi Sq. p val=", round(crossStats$chisq$p.value, 2), ")")
+      
+      # plot table
+      plotStates<-as.data.frame(melt(states))
+      plotStatesCts<-as.data.frame(melt(stateCts))
+      #plotStates$textlabel<-paste0(round(plotStates$value,1)," (n=",plotStatesCts$value,")")
+      # calculate anomalies
+      plotStates$anom <- ifelse(plotStates$state2 ==2 | plotStates$state2 ==3, plotStates$value-34, plotStates$value-16)
+      # up/down arrows
+      plotStates$arrow<-NA
+      plotStates$arrow <- ifelse(plotStates$anom <0, paste0('⬇'), paste0('⬆'))
+      plotStates$textlabel<-paste0(round(plotStates$value,1)," (n=",plotStatesCts$value,") ",plotStates$arrow)
+      
+      p1<-ggplot(data=plotStates)+
+        geom_tile(aes(x=state2,y=state1,fill=anom),color = "black")+ 
+        geom_text(aes(x=state2,y=state1,fill=anom, label = textlabel), size=4)+
+        scale_fill_gradient2(low="lightyellow", mid="white",high="lightblue", midpoint = 0,
+                             guide = guide_legend(title="prob anom(%)"))+
+        scale_x_discrete(labels=lblText, limits=lims)+
+        scale_y_discrete(labels=lblText, limits=lims)+
+        labs(x = xlabText, y=ylabText, title=(droughtTitle))+
+        theme(axis.text = element_text(size =14))+
+        theme(axis.title = element_text(size=14))+
+        theme(axis.text.x = element_text(size=14))+
+        theme(axis.text.y = element_text(size=14))+
+        theme(legend.position = "none") # can change to left or right
+      
+      
+      # output$gantt<-renderPlot({
+      p2<-ggplot(df_melted, aes(value, task)) +
+        geom_line(size = 3, aes(color=task)) +
+        scale_colour_manual(values=c("Period 1"="grey56", "Period 2"="grey19"))+
+        labs(x = '', y = '', title = paste0(indexNameShort,' Timescales')) +
+        theme_bw(base_size = 20) +
+        theme(plot.title = element_text(hjust = 0.5, size = 12),
+              panel.grid.major.x = element_line(colour="grey73", linetype = "dashed"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.text.x = element_text(angle = 0, size=14),
+              axis.text.y = element_text(size=14),
+              legend.position="none") +
+        scale_x_date(date_labels = "%b", date_breaks = '1 month') #limits = c(NA, NA)
+      
+      # scatterplot of transition table values
+      scatTemp<-as.data.frame(state2temp$`dataTrim$year`)
+      scatTemp$Period1<-state1temp$precip1
+      scatTemp$Period2<-state2temp$precip2
+      colnames(scatTemp)[1]<-"year"
+      
+      
+      ## NEW BUG FIX deal with use case mo1>mo2 for scatterplot
+      shift <- function(x, n){
+        c(x[-(seq(n))], rep(NA, n))
+      }
+      
+      if (mo1 > mo2){
+        scatTemp$Period2 <- shift(scatTemp$Period2, 1)
+        # temp2<-scatTemp$Period2[2:nrow(scatTemp)]
+        # temp2[nrow(temp2)+1]<-NA
+        # scatTemp$Period2<-temp2
+      }
+      ## 
+      
+      # dynamic labels for scat plot
+      ylabTextscat<-paste0("Period 1 Total Precip (in): ", format(p1st,"%b"),"-", format(p1en,"%b"))
+      xlabTextscat<-paste0("Period 2 Total Precip (in): ", format(p2st,"%b"),"-", format(p2en,"%b"))
+      # dynamic title for scat
+      droughtTitlescat<-paste0("Seasonal Total Precipitation (in): ",min(spiStates$`dataTrim$year`),"-",max(spiStates$`dataTrim$year`))
+      
+      pScat <- ggplot(data = scatTemp, aes(x = Period2, y = Period1)) +
+        geom_point(aes(text = paste("Year:", year)), shape=21, fill="red", color="red4", size=2) +
+        geom_vline(xintercept=spiBounds$V2[1])+
+        geom_text(aes(spiBounds$V2[1]+0.15, 0.05),label ='SPI +1', size=3, angle=45) +
+        geom_vline(xintercept=spiBounds$V2[2])+
+        geom_text(aes(spiBounds$V2[2]+0.15, 0.05),label ='SPI 0', size=3, angle=45) +
+        geom_vline(xintercept=spiBounds$V2[3])+
+        geom_text(aes(spiBounds$V2[3]+0.15, 0.05),label ='SPI -1', size=3, angle=45) +
+        geom_hline(yintercept=spiBounds$V1[1])+
+        geom_text(aes(0.05,spiBounds$V1[1]+0.05),label ='SPI +1', vjust = 0, size=3) +
+        geom_hline(yintercept=spiBounds$V1[2])+
+        geom_text(aes(0.05,spiBounds$V1[2]+0.05),label ='SPI 0', vjust = 0, size=3) +
+        geom_hline(yintercept=spiBounds$V1[3])+
+        geom_text(aes(0.05,spiBounds$V1[3]+0.05),label ='SPI -1', vjust = 0, size=3) +
+        labs(x = xlabTextscat, y=ylabTextscat, title=droughtTitlescat)+
+        theme_bw()
+      pScat <- ggplotly(pScat)
+      
+      #})
+      #grid.arrange(p1, p2, ncol = 1, heights = unit(c(0.65, 0.35),"npc")) # heights = c(3, 1), heights = unit(c(0.65, 0.35)
+      pAll<-subplot(p1,p2,pScat, nrows = 3, heights = c(0.4,0.2,0.4), titleX = TRUE, titleY = TRUE, margin=0.08, which_layout = 1)
+      pAll
+      # improve plotly download image
+      # https://stackoverflow.com/questions/46243516/plotly-download-as-png-resizing-image-when-used-in-rshiny-application
+      # plotly_IMAGE(pAll, 
+      #              width = 800, 
+      #              height = 600, 
+      #              format = "png", 
+      #              scale = 1, 
+      #              out_file = "output.png")
+      # pAll
+      
+    })
+  
+})
+  
+}
+
+
+## Call app
+shinyApp(ui=ui, server=server)
