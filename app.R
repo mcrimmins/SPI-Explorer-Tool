@@ -16,8 +16,13 @@
 # library(profvis)
 # profvis(runApp())
 
+#####
+# BETA version developed in Sept 2022
 # updates with R 4.1.2 on hpz
-
+# added error checks and lat/lon entry
+# further edits/updates 4/9/2025
+# NOW WORKING VERSION on shinyapps.io, viz.data and gitHub
+#####
 
 
 ## NON-INTERACTIVE
@@ -35,13 +40,15 @@ library(leaflet)
 library(zoo)
 library(gridExtra)
 library(gmodels)
+library(SCI)
+library(TLMoments)
 
 # API key
 source('APIkey.R', local=TRUE)
 
 # initial point for marker
-latIn<-32
-lonIn<--110
+#latIn<-NULL
+#lonIn<-NULL
 
 # slider input for year selection
 INTERVAL = 29
@@ -68,7 +75,7 @@ ui<-tagList(
     </script>"
   )),
   
-  navbarPage(strong("Standardized Precipitation Index Explorer Tool V2.0"),
+  navbarPage(strong("Standardized Precipitation Index Explorer Tool V2.1"),
              
              tabPanel("About Tool",
                       sidebarLayout(
@@ -147,7 +154,7 @@ ui<-tagList(
                           ),
                           HTML('<div style="text-align: center;">Contact Mike Crimmins (<a
                                href="mailto:crimmins@email.arizona.edu">crimmins@email.arizona.edu</a>)
-                               with questions or comments. SPI Explorer Tool v2.0 06/17/22</div>'
+                               with questions or comments. SPI Explorer Tool v2.1 04/9/25</div>'
                           )
                           )
                           )
@@ -156,26 +163,32 @@ ui<-tagList(
                       sidebarLayout(
                         sidebarPanel(
                           h4("Set location and time period"),
-                          p("1. Click map to select location (use +/- buttons to zoom, use cursor to pan)"),
-                          p("2. Use slider to choose time period of interest (limited to at least 30 yr period)"),
-                          p("3. Choose drought index (SPI or SPEI)"),
-                          p("4. Click download (this may take a couple of seconds, look to upper right corner for progress message)"),
+                          p(HTML("1. <b>CLICK MAP</b> to select location (use +/- buttons to zoom, use cursor to pan)")),
+                          p(HTML("<b>OR</b> enter in Lat/Lon location in decimal degrees and click 'Enter location'")),
+                          # adding in lat/lon numeric input
+                          numericInput("lat", "Latitude", NULL),
+                          numericInput("lon", "Longitude", NULL),
+                          actionButton("button", "Enter location"),
+                          p(),
                          
                           # text input for year selection
                           #numericInput("yearFirst","First year:",value = 1895, min=1895, max=(format(Sys.Date()-32, "%Y")), step=1, width = "100px"),
                           #numericInput("yearLast","Last year:",value = format(Sys.Date()-32, "%Y"), min=1896, max=format(Sys.Date()-32, "%Y"), step=1, width = "100px"),
                           
+                          p(HTML("2. <b>Use slider</b> to choose analysis period of interest (limited to at least 30 yr period)")),
                           # slider input for years
                           sliderInput("years", "Analysis Period",
                                       min = 1895, max = as.numeric(format(Sys.Date()-32, "%Y")), value = value, sep=''),
                           
+                          p(HTML("3. <b>Choose</b> drought index (SPI or SPEI)")),
                           radioButtons("dindex", label =("Drought Index"),
                                        choices = list("Standardized Precipitation Index" = 1, "Standardized Precipitation-Evapotranspiration Index" = 2), 
                                        selected = 1),
                           
+                          p(HTML("4. <b>Click download</b> (this may take a couple of seconds, look to upper right corner for progress message)")),
                           actionButton("refresh","Download data"),
                           hr(),
-                          p("Re-download the dataset if you make any changes to location, time period or selected drought index"),
+                          p(HTML("<b>Re-download the dataset if you make any changes to location, time period or selected drought index</b>")),
                           p("All statistics and figures on other pages are calculated based on the location and time period specified here. The time period selection forces a minimum length of 30 years to ensure enough observations to calculate meaningful drought indices and climate statistics.")
                           
                         ),
@@ -343,6 +356,12 @@ ui<-tagList(
 
 server <- function(input, output, session) {
   
+  latIn<-reactiveVal(-999)
+  lonIn<-reactiveVal(-999)
+  
+  # coords <- reactiveValues(latIn = NULL,
+  #                          lonIn = NULL)
+  
   #####
   # original map click get lat/lon
   # add in leaflet map, overlay PRISM avg precip map or DEM grid...
@@ -355,10 +374,28 @@ server <- function(input, output, session) {
   observeEvent(input$MyMap_click, {
     leafletProxy("MyMap")%>% clearMarkers() %>%
       addMarkers(input$MyMap_click$lng, input$MyMap_click$lat)
-    latIn<-input$MyMap_click$lat
-    lonIn<-input$MyMap_click$lng
-    output$latSel<-renderText({paste("Latitude: ",latIn)})
-    output$lonSel<-renderText({paste("Longitude: ",lonIn)})
+    # update text boxes based on map click
+    updateNumericInput(session, "lat", value = input$MyMap_click$lat)
+    updateNumericInput(session, "lon", value = input$MyMap_click$lng)    
+    # get location
+    latIn(input$MyMap_click$lat)
+    lonIn(input$MyMap_click$lng)
+    output$latSel<-renderText({paste("Latitude: ",latIn())})
+    output$lonSel<-renderText({paste("Longitude: ",lonIn())})
+  })
+  
+  # look for numeric location input
+  observeEvent(input$button, {
+    leafletProxy("MyMap")%>% clearMarkers() %>%
+      addMarkers(input$lon, input$lat) %>%
+      setView(lng = isolate(input$lon),
+              lat = isolate(input$lat),
+              zoom = 6)
+    # get location
+    latIn(input$lat)
+    lonIn(input$lon)
+    output$latSel<-renderText({paste("Latitude: ",latIn())})
+    output$lonSel<-renderText({paste("Longitude: ",lonIn())})
   })
   #####
   
@@ -407,14 +444,23 @@ server <- function(input, output, session) {
 
     ######
     # error catch on no map click with download button
-    if(is.null(input$MyMap_click))
+    if(is.null(input$MyMap_click) && is.na(input$lat)){
+      locCheck<-0
+    }else {
+      locCheck<-1
+    } 
+    
+    #if(is.null(input$MyMap_click) && is.na(input$lat))
+    if(locCheck==0)
       showModal(modalDialog(
         title = "Click on map to add location first, then click Download Data",
         easyClose = TRUE,
         footer = NULL
       ))
+    shiny::validate(need(locCheck!=0, message = "Click map or enter coordinates to add location"))
+    #shiny::validate(need(is.null(input$MyMap_click) != is.na(input$lat), message = "Click map or enter coordinates to add location"))
+    # shiny::validate(need(length(locCheck)!=0, message = "Click map or enter coordinates to add location"))
     #shiny::validate(need(!is.null(input$MyMap_click), message = "Click map to add location"))
-    shiny::validate(need(input$MyMap_click != '', message = "Click map to add location"))
     #req(input$MyMap_click)  
     #####
     
@@ -422,9 +468,12 @@ server <- function(input, output, session) {
     withProgress(message = 'Downloading data set', style="old",
                  detail = 'Please wait...',{
                    
+                   # map location
+                   lat<-latIn()
+                   lon<-lonIn()
                    # map click lat/lon
-                   lat=input$MyMap_click$lat # input from map
-                   lon=input$MyMap_click$lng # input from map
+                   #lat=input$MyMap_click$lat # input from map
+                   #lon=input$MyMap_click$lng # input from map
                    # drag marker lat/lon
                    #lat=input$MyMap_marker_dragend$lat # input from map
                    #lon=input$MyMap_marker_dragend$lng # input from map
@@ -473,8 +522,12 @@ server <- function(input, output, session) {
                    if (as.numeric(input$dindex)==1){
                      ## Loop thru full SPI set
                      for(i in 1:48){
-                       tempSPI <- spi(data$precip,i, na.rm = TRUE)
-                       data[[paste('spi',i,sep="")]] <-tempSPI$fitted
+                       #tempSPI <- spi(data$precip,i, na.rm = TRUE)
+                       #data[[paste('spi',i,sep="")]] <-tempSPI$fitted
+                       tempSPI <- transformSCI(data$precip,first.mon=1,
+                                           obj=fitSCI(data$precip,first.mon=1,time.scale=i,distr="gamma",p0=TRUE,
+                                                      sci.limit=3))
+                       data[[paste('spi',i,sep="")]] <-tempSPI
                      }
                      indexName="Standardized Precipitation Index"
                      indexNameShort="SPI"
@@ -482,10 +535,15 @@ server <- function(input, output, session) {
                    else{
                      # # SPEI switch?
                      #  PET <- thornthwaite(fahrenheit.to.celsius(data$t_mean,round=2), lat, na.rm = TRUE) 
-                     PET <- hargreaves(fahrenheit.to.celsius(data$t_min,round=2),fahrenheit.to.celsius(data$t_max,round=2),Ra=NA, lat, na.rm = TRUE) 
+                     PET <- hargreaves(fahrenheit.to.celsius(data$t_min,round=2),fahrenheit.to.celsius(data$t_max,round=2),Ra=NULL, lat, na.rm = TRUE) 
                      for(i in 1:48){
-                       tempSPI <- spei(inches_to_metric(data$precip,unit="mm",round=2)-PET,i, na.rm = TRUE)
-                       data[[paste('spi',i,sep="")]] <-tempSPI$fitted
+                       #tempSPI <- spei(inches_to_metric(data$precip,unit="mm",round=2)-PET,i, na.rm = TRUE)
+                       #data[[paste('spi',i,sep="")]] <-tempSPI$fitted
+                       tempSPI <- transformSCI(inches_to_metric(data$precip,unit="mm",round=2)-PET,first.mon=1,
+                                               obj=fitSCI(inches_to_metric(data$precip,unit="mm",round=2)-PET,
+                                                          first.mon=1,time.scale=i,distr="gev",p0=TRUE,
+                                                          sci.limit=3))
+                       data[[paste('spi',i,sep="")]] <-tempSPI
                      }
                      indexName="Standardized Precipitation-Evapotranspiration Index"
                      indexNameShort="SPEI"
@@ -504,6 +562,10 @@ server <- function(input, output, session) {
                    # data$precip3sum= c(rep(NA, nrow(data) - length(temp)),temp)
                    # temp<-rollapply(data$precip,12, sum)
                    # data$precip12sum= c(rep(NA, nrow(data) - length(temp)),temp)
+                   
+                   # set -Inf and Inf to NA in data
+                   data[data == -Inf] <- NA
+                   data[data == Inf] <- NA
                    
                    ## Loop thru full raw precip totals
                    data$precip1sum<-data$precip
@@ -526,15 +588,28 @@ server <- function(input, output, session) {
                    }else{
                      
                    }
-                   
-  })
+              
+    })
+    
+    #####
+    # error catch if all are NA, choose another location
+    if(nrow(data)==0)
+      showModal(modalDialog(
+        title = "No data available -- Please select another location within continental U.S.",
+        easyClose = TRUE,
+        footer = NULL
+      ))
+    shiny::validate(need(nrow(data)>0, message = "No data available, please choose another location"))
+    #####
     
     ### END INTERACTIVE
     
     # ---- Plot PRISM Grid map
     # ggmap of PRISM grid
-    lat=input$MyMap_click$lat # input from map
-    lon=input$MyMap_click$lng # input from map
+    #lat=input$MyMap_click$lat # input from map
+    #lon=input$MyMap_click$lng # input from map
+    #lat=latIn() # input from map
+    #lon=lonIn() # input from map
     latlon<-as.data.frame(cbind(lat,lon))
     
     lonP = metaOut$meta$lon
