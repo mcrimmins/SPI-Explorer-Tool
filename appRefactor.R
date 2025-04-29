@@ -1,3 +1,5 @@
+# app testing 
+
 # SPI Tool based on PRISM data
 # 12/21/15
 
@@ -43,8 +45,53 @@ library(gmodels)
 library(SCI)
 library(TLMoments)
 
+##### refactor
+
+# Safely source API keys
+if (file.exists("APIkey.R")) {
+  tryCatch({
+    source("APIkey.R", local = TRUE)
+  }, error = function(e) {
+    warning("Problem sourcing APIkey.R: ", e$message)
+  })
+} else {
+  warning("APIkey.R not found. Continuing without API keys.")
+}
+
+# Harden external API fetch
+safePostForm <- function(url, jsonQuery) {
+  response <- tryCatch({
+    RCurl::postForm(url,
+                    .opts = list(
+                      postfields = jsonQuery,
+                      httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')
+                    )
+    )
+  }, error = function(e) {
+    warning(paste0("RCurl POST failed: ", e$message))
+    return(NULL)
+  })
+  
+  if (is.null(response) || nchar(response) == 0) {
+    return(NULL)
+  }
+  
+  result <- tryCatch({
+    jsonlite::fromJSON(response)
+  }, error = function(e) {
+    warning(paste0("JSON parsing failed: ", e$message))
+    return(NULL)
+  })
+  
+  return(result)
+}
+
+#####
+
+
+
 # API key
-source('APIkey.R', local=TRUE)
+#source('APIkey.R', local=TRUE)
 
 # initial point for marker
 #latIn<-NULL
@@ -156,9 +203,9 @@ ui<-tagList(
                                href="mailto:crimmins@email.arizona.edu">crimmins@email.arizona.edu</a>)
                                with questions or comments. SPI Explorer Tool v2.1 04/9/25</div>'
                           )
-                          )
-                          )
-                          ),                   
+                        )
+                      )
+             ),                   
              tabPanel("Set location/time period",
                       sidebarLayout(
                         sidebarPanel(
@@ -170,7 +217,7 @@ ui<-tagList(
                           numericInput("lon", "Longitude", NULL),
                           actionButton("button", "Enter location"),
                           p(),
-                         
+                          
                           # text input for year selection
                           #numericInput("yearFirst","First year:",value = 1895, min=1895, max=(format(Sys.Date()-32, "%Y")), step=1, width = "100px"),
                           #numericInput("yearLast","Last year:",value = format(Sys.Date()-32, "%Y"), min=1896, max=format(Sys.Date()-32, "%Y"), step=1, width = "100px"),
@@ -218,14 +265,14 @@ ui<-tagList(
                                      hr(),
                                      downloadButton("downloadAnnData", "Download Data Table"),
                                      hr()
-                                     ),
+                        ),
                         mainPanel(
                           plotOutput("annPlot"),
                           plotOutput("annPlotTemp"),
                           dataTableOutput('annTable')
                         )
-                        )
-                      ),
+                      )
+             ),
              tabPanel("SPI Timescale Comparison",
                       sidebarLayout(
                         sidebarPanel(h4("Comparing different SPI timescales"),
@@ -244,14 +291,14 @@ ui<-tagList(
                                        term drought conditions. Sometimes drought conditions at longer SPI timescales can persist even when short
                                        term conditions have improved or vice versa. By looking at all SPI timescales for a given date, you can diagnose 
                                        whether short or long term drought conditions are present or a combination of both.")
-                                     ),
+                        ),
                         mainPanel(
                           plotOutput("spiPlots"),
                           hr(),
                           plotlyOutput("plotMultiSPI")
                         )
-                                     )
-                        ),
+                      )
+             ),
              tabPanel("SPI-Precip Comparison",
                       sidebarLayout(
                         sidebarPanel(
@@ -331,7 +378,7 @@ ui<-tagList(
                             precipitation total, you would set Month 1 to 1-month SPI and July and Month 2 to 3-month SPI and September.
                             Reading across the first row (month 1-very wet) to the last column (month 2-very wet) indicates the probability
                             of this outcome based on historical occurrences. A longer period of record yields more stable results.")
-                          ),
+                        ),
                         mainPanel(
                           #plotOutput("transPlot"),
                           plotlyOutput("transPlot", width = "100%", height = "1000px"),
@@ -345,13 +392,13 @@ ui<-tagList(
                           )
                           
                         )
-                          )
                       )
-             
-             
-             
              )
-             )
+             
+             
+             
+  )
+)
 ## Server Section
 
 server <- function(input, output, session) {
@@ -370,7 +417,7 @@ server <- function(input, output, session) {
     m %>% addProviderTiles("Esri.WorldTopoMap") 
     #%>% addMarkers(lonIn, latIn)
   })
-
+  
   observeEvent(input$MyMap_click, {
     leafletProxy("MyMap")%>% clearMarkers() %>%
       addMarkers(input$MyMap_click$lng, input$MyMap_click$lat)
@@ -441,82 +488,87 @@ server <- function(input, output, session) {
   
   # download and process data  
   observeEvent(input$refresh, {
-
-    ######
-    # error catch on no map click with download button
-    if(is.null(input$MyMap_click) && is.na(input$lat)){
-      locCheck<-0
-    }else {
-      locCheck<-1
-    } 
     
-    #if(is.null(input$MyMap_click) && is.na(input$lat))
-    if(locCheck==0)
+    if (is.null(input$MyMap_click) && is.na(input$lat)) {
       showModal(modalDialog(
-        title = "Click on map to add location first, then click Download Data",
+        title = "Click on the map or enter a location first",
         easyClose = TRUE,
         footer = NULL
       ))
-    shiny::validate(need(locCheck!=0, message = "Click map or enter coordinates to add location"))
-    #shiny::validate(need(is.null(input$MyMap_click) != is.na(input$lat), message = "Click map or enter coordinates to add location"))
-    # shiny::validate(need(length(locCheck)!=0, message = "Click map or enter coordinates to add location"))
-    #shiny::validate(need(!is.null(input$MyMap_click), message = "Click map to add location"))
-    #req(input$MyMap_click)  
-    #####
+      return()
+    }
     
-    
-    withProgress(message = 'Downloading data set', style="old",
-                 detail = 'Please wait...',{
-                   
-                   # map location
-                   lat<-latIn()
-                   lon<-lonIn()
-                   # map click lat/lon
-                   #lat=input$MyMap_click$lat # input from map
-                   #lon=input$MyMap_click$lng # input from map
-                   # drag marker lat/lon
-                   #lat=input$MyMap_marker_dragend$lat # input from map
-                   #lon=input$MyMap_marker_dragend$lng # input from map
-                   
-                   # text year input
-                   #firstYR=as.numeric(input$yearFirst)
-                   #lastYR=as.numeric(input$yearLast)
-                   
-                   # sliderinput years
-                   firstYR=as.numeric(value[1])
-                   lastYR=as.numeric(value[2])
-                   
-                   # download data
-                   jsonQuery=paste0('{"loc":"',lon,',',lat,'","sdate":"',firstYR,'01","edate":"',lastYR,'12","grid":"21",
-                                    "elems":[{"name":"mly_maxt","units":"degreeF"},{"name":"mly_mint","units":"degreeF"},
-                                    {"name":"mly_avgt","units":"degreeF"},{"name":"mly_pcpn","units":"inch"}]}')
-                   out<-postForm("http://data.rcc-acis.org/GridData", 
-                                 .opts = list(postfields = jsonQuery, 
-                                              httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')))
-                   out<-fromJSON(out)
-                   
-                   # meta output
-                   jsonQuery=paste0('{"loc":"',lon,',',lat,'","grid":"21","elems":"4","meta":"ll,elev","date":"2010-01-01"}')
-                   metaOut<-postForm("http://data.rcc-acis.org/GridData", 
-                                     .opts = list(postfields = jsonQuery, 
-                                                  httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')))
-                   metaOut<-fromJSON(metaOut)
-                   output$elev<-renderText({paste("Avg Elevation of Grid Cell (ft): ",as.character(metaOut$meta$elev))})
-                   
-                   # get data from list
-                   data<-data.frame(out$data)
-                   colnames(data)<-c("date","t_max","t_min","t_mean","precip")
-                   data$date<-as.Date(paste(data$date,"-01",sep=""))
-                   # set -999 to NA
-                   data[data == -999] <- NA
-                   
-                   # convert columns to numeric
-                   unfactorize<-c("t_max","t_min","t_mean","precip")
-                   data[,unfactorize]<-lapply(unfactorize, function(x) as.numeric(as.character(data[,x])))
-                   
-                   # get months and years
-                   data$month<-as.numeric(format(data$date, "%m"))
-                   data$year<-as.numeric(format(data$date, "%Y"))
+    withProgress(message = 'Downloading data set', detail = 'Please wait...', {
+      
+      lat <- latIn()
+      lon <- lonIn()
+      firstYR <- as.numeric(value[1])
+      lastYR <- as.numeric(value[2])
+      
+      ## ---- 1. Main climate data query (out) ----
+      
+      jsonQuery <- sprintf('{"loc":"%f,%f","sdate":"%d01","edate":"%d12","grid":"21",
+      "elems":[{"name":"mly_maxt","units":"degreeF"},
+               {"name":"mly_mint","units":"degreeF"},
+               {"name":"mly_avgt","units":"degreeF"},
+               {"name":"mly_pcpn","units":"inch"}]}', lon, lat, firstYR, lastYR)
+      
+      out <- safePostForm("http://data.rcc-acis.org/GridData", jsonQuery)
+      
+      if (is.null(out)) {
+        showModal(modalDialog(
+          title = "Data download failed",
+          "Could not fetch main climate dataset. Please try again later.",
+          easyClose = TRUE,
+          footer = NULL
+        ))
+        return()
+      }
+      
+      data <- tryCatch({
+        df <- as.data.frame(out$data)
+        names(df) <- c("date","t_max","t_min","t_mean","precip")
+        df$date <- as.Date(paste0(df$date, "-01"))
+        df[df == -999] <- NA
+        numcols <- c("t_max","t_min","t_mean","precip")
+        df[, numcols] <- lapply(df[, numcols], as.numeric)
+        df$month <- as.numeric(format(df$date, "%m"))
+        df$year <- as.numeric(format(df$date, "%Y"))
+        df
+      }, error = function(e) {
+        showModal(modalDialog(
+          title = "Data processing error",
+          paste0("Could not process main data: ", e$message),
+          easyClose = TRUE,
+          footer = NULL
+        ))
+        NULL
+      })
+      
+      if (is.null(data)) return()
+      
+      ## ---- 2. Metadata query (metaOut) ----
+      
+      jsonQuery_meta <- sprintf('{"loc":"%f,%f","grid":"21","elems":"4","meta":"ll,elev","date":"2010-01-01"}', lon, lat)
+      
+      metaOut <- safePostForm("http://data.rcc-acis.org/GridData", jsonQuery_meta)
+      
+      if (is.null(metaOut)) {
+        showModal(modalDialog(
+          title = "Metadata download failed",
+          "Could not fetch grid metadata (elevation, etc.). Some plots may not work correctly.",
+          easyClose = TRUE,
+          footer = NULL
+        ))
+        return()
+      }
+      
+      ## ---- 3. After this, continue using metaOut and data ----
+      
+      # Example: setting text outputs
+      output$elev <- renderText({ 
+        paste("Avg Elevation of Grid Cell (ft): ", as.character(metaOut$meta$elev))
+      })
                    
                    # Switch between SPI/SPEI 
                    if (as.numeric(input$dindex)==1){
@@ -525,15 +577,33 @@ server <- function(input, output, session) {
                        #tempSPI <- spi(data$precip,i, na.rm = TRUE)
                        #data[[paste('spi',i,sep="")]] <-tempSPI$fitted
                        tempSPI <- transformSCI(data$precip,first.mon=1,
-                                           obj=fitSCI(data$precip,first.mon=1,time.scale=i,distr="gamma",p0=TRUE,
-                                                      sci.limit=3))
+                                               obj=fitSCI(data$precip,first.mon=1,time.scale=i,distr="gamma",p0=TRUE,
+                                                          sci.limit=3))
                        data[[paste('spi',i,sep="")]] <-tempSPI
                      }
                      indexName="Standardized Precipitation Index"
                      indexNameShort="SPI"
                    }
                    else{
-                     # # SPEI switch?
+                     #SPEI switch
+                  
+                     #### debug
+                     print(paste("Lat value before PET calculation:", lat))
+                     print("Sample t_min values:")
+                     print(head(data$t_min))
+                     print("Sample t_max values:")
+                     print(head(data$t_max))
+                     
+                     if (is.null(lat) || is.na(lat) || lat == -999) {
+                       stop("Latitude is invalid for SPEI calculation.")
+                     }
+                     
+                     if (all(is.na(data$t_min)) || all(is.na(data$t_max))) {
+                       stop("Temperature data missing for SPEI calculation.")
+                     }
+                     #####
+                     
+                     
                      #  PET <- thornthwaite(fahrenheit.to.celsius(data$t_mean,round=2), lat, na.rm = TRUE) 
                      PET <- hargreaves(fahrenheit.to.celsius(data$t_min,round=2),fahrenheit.to.celsius(data$t_max,round=2),Ra=NULL, lat, na.rm = TRUE) 
                      for(i in 1:48){
@@ -588,8 +658,8 @@ server <- function(input, output, session) {
                    }else{
                      
                    }
-              
-    })
+                   
+                 })
     
     #####
     # error catch if all are NA, choose another location
@@ -978,8 +1048,8 @@ server <- function(input, output, session) {
       states<-cbind.data.frame(state1,state2)
       #---- getting chi square info
       
-        statesTest<-cbind.data.frame(state1,state2)
-        crossStats<-CrossTable(statesTest$state1,statesTest$state2, expected = TRUE)
+      statesTest<-cbind.data.frame(state1,state2)
+      crossStats<-CrossTable(statesTest$state1,statesTest$state2, expected = TRUE)
       #----
       states<-table(states) # counts
       stateCts<-states
@@ -1092,8 +1162,8 @@ server <- function(input, output, session) {
       # pAll
       
     })
-  
-})
+    
+  })
   
 }
 
